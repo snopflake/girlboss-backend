@@ -3,7 +3,10 @@ import { loadEnv } from "./config/env.js";
 
 try {
   const env = loadEnv();
-  const app = createApp({ CORS_ORIGIN: env.CORS_ORIGIN });
+  const app = createApp({
+    CORS_ORIGIN: env.CORS_ORIGIN,
+    NODE_ENV: env.NODE_ENV,
+  });
   const server = app.listen(env.PORT, () => {
     console.info(`GirlBoss API berjalan pada port ${env.PORT}`);
   });

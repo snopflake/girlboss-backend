@@ -18,6 +18,19 @@ Skrip yang tersedia:
 - `npm run check:supabase` memeriksa konektivitas Supabase dan membaca roles secara read-only. Memerlukan seluruh variabel Supabase pada `.env`; skrip ini bukan endpoint API.
 - `npm test` menjalankan integration test health endpoint dengan test runner bawaan Node.js.
 
+## Authentication
+
+- `POST /api/auth/register` menerima pendaftaran APPLICANT atau COMPANY. Supabase Auth mengirim email verifikasi sesuai konfigurasi project; respons selalu generik untuk menghindari account enumeration.
+- `POST /api/auth/login` mengembalikan access/refresh token setelah token session didapat dan profil aplikasi dinyatakan `ACTIVE`.
+- `GET /api/auth/me` memverifikasi Bearer token dengan Supabase Auth dan mengembalikan data pengguna serta profil miliknya.
+- `/api/applicant/test`, `/api/company/test`, dan `/api/admin/test` hanya dipasang pada `NODE_ENV=development`.
+
+Auth request membuat Supabase client tersendiri, jadi session tidak berbagi state antar-request. `public.users` dan relasi `roles` menjadi sumber role aplikasi; metadata user tidak dipakai untuk otorisasi. Frontend sebaiknya memilih satu pengelola session yang konsisten dengan Supabase Auth SDK dan tidak mencatat token.
+
+Rate limiting in-memory diterapkan pada endpoint register dan login. Untuk deployment multi-instance, gunakan store rate-limit bersama.
+
+Migration trigger dan RLS di `supabase/migrations/` **tidak dijalankan otomatis**. Periksa trigger `auth.users` dan policies pada tabel target terlebih dahulu; migration memiliki preflight yang berhenti jika menemukan trigger/policy lain. Jalankan SQL secara manual di Supabase SQL Editor dengan urutan timestamp. Setelah migration diterapkan, `supabase/tests/auth_rls.sql` menguji akses positif dan isolasi negatif; ganti placeholder UUID dengan akun tes APPLICANT dan COMPANY yang sudah ada.
+
 ## Struktur dan layer
 
 - `src/routes/` memetakan URL ke controller.

@@ -3,11 +3,7 @@ import { loadEnv } from "./env.js";
 
 let supabaseClient: SupabaseClient | undefined;
 
-export function getSupabaseClient(): SupabaseClient {
-  if (supabaseClient) {
-    return supabaseClient;
-  }
-
+export function createSupabaseUserClient(accessToken?: string): SupabaseClient {
   const env = loadEnv();
   if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
     throw new Error(
@@ -15,13 +11,20 @@ export function getSupabaseClient(): SupabaseClient {
     );
   }
 
-  supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
     },
+    ...(accessToken
+      ? { global: { headers: { Authorization: `Bearer ${accessToken}` } } }
+      : {}),
   });
+}
 
-  return supabaseClient;
+export function getSupabaseClient(): SupabaseClient {
+  const client = supabaseClient ?? createSupabaseUserClient();
+  supabaseClient = client;
+  return client;
 }
