@@ -15,6 +15,7 @@ Skrip yang tersedia:
 - `npm start` menjalankan hasil build.
 - `npm run lint` menjalankan ESLint.
 - `npm run typecheck` memeriksa tipe TypeScript, termasuk test.
+- `npm run check:supabase` memeriksa konektivitas Supabase dan membaca roles secara read-only. Memerlukan seluruh variabel Supabase pada `.env`; skrip ini bukan endpoint API.
 - `npm test` menjalankan integration test health endpoint dengan test runner bawaan Node.js.
 
 ## Struktur dan layer
@@ -41,9 +42,9 @@ Folder `validators/`, `types/`, `utils/`, serta `supabase/migrations/` disiapkan
 Salin `.env.example` ke `.env`, lalu isi:
 
 - `NODE_ENV`, `PORT`, dan `CORS_ORIGIN` untuk server lokal dan konfigurasi CORS.
-- `SUPABASE_URL` dan `SUPABASE_PUBLISHABLE_KEY` hanya saat fitur database akan digunakan. Keduanya opsional untuk health check.
-- `SUPABASE_SECRET_KEY` bersifat opsional dan server-only; belum digunakan oleh foundation.
+- `SUPABASE_PROJECT_ID`, `SUPABASE_URL`, dan `SUPABASE_PUBLISHABLE_KEY` untuk koneksi project Supabase. Variabel Supabase opsional untuk health check.
+- `SUPABASE_SECRET_KEY` hanya server-side. `npm run check:supabase` memerlukannya untuk query read-only roles menggunakan Admin Client.
 
-Jika Supabase belum dikonfigurasi lalu kode meminta client database, konfigurasi akan menghasilkan error yang jelas. Tidak ada koneksi atau data palsu.
+Publishable key harus berprefix `sb_publishable_` dan secret key harus berprefix `sb_secret_`. Jika Supabase belum dikonfigurasi lalu kode meminta client database, konfigurasi akan menghasilkan error yang jelas. Tidak ada koneksi atau data palsu. Admin Client hanya digunakan oleh trusted backend code dan tidak diekspos melalui API.
 
 Jangan commit `.env` atau credential. Backend ini belum melakukan otorisasi request; Supabase secret key tidak digunakan untuk operasi data.

@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:supabase": "tsx scripts/check-supabase.ts",
     "test": "node --import tsx --test tests/health.integration.test.ts"
   },
   "keywords": [],
