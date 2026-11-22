@@ -16,7 +16,7 @@ Skrip yang tersedia:
 - `npm run lint` menjalankan ESLint.
 - `npm run typecheck` memeriksa tipe TypeScript, termasuk test.
 - `npm run check:supabase` memeriksa konektivitas Supabase dan membaca roles secara read-only. Memerlukan seluruh variabel Supabase pada `.env`; skrip ini bukan endpoint API.
-- `npm test` menjalankan integration test health endpoint dengan test runner bawaan Node.js.
+- `npm test` menjalankan integration test health, authentication, dan Jobs API dengan test runner bawaan Node.js.
 
 ## Authentication
 
@@ -27,6 +27,48 @@ Skrip yang tersedia:
 
 Auth request membuat Supabase client tersendiri, jadi session tidak berbagi state antar-request. `public.users` dan relasi `roles` menjadi sumber role aplikasi; metadata user tidak dipakai untuk otorisasi. Frontend sebaiknya memilih satu pengelola session yang konsisten dengan Supabase Auth SDK dan tidak mencatat token.
 
+### Integrasi Login dan Register
+
+Semua request dan response menggunakan JSON. Register menerima salah satu bentuk berikut:
+
+```json
+{
+  "fullName": "Applicant Test",
+  "email": "applicant@example.com",
+  "password": "password-minimal-8-karakter",
+  "accountType": "APPLICANT"
+}
+```
+
+```json
+{
+  "fullName": "Company Test",
+  "email": "company@example.com",
+  "password": "password-minimal-8-karakter",
+  "accountType": "COMPANY",
+  "companyName": "Example Company"
+}
+```
+
+Register mengembalikan HTTP 202 dengan response generik; frontend tidak boleh menganggap akun sudah dapat login sebelum email terkonfirmasi. Field tambahan seperti role, `user_id`, atau status akun ditolak.
+
+Login menerima:
+
+```json
+{
+  "email": "applicant@example.com",
+  "password": "password-yang-digunakan"
+}
+```
+
+Respons sukses HTTP 200 berisi `data.user` (`id`, `email`, `fullName`, `role`, `accountStatus`) serta `accessToken`, `refreshToken`, dan `expiresIn`. Simpan token hanya melalui mekanisme session yang dipilih frontend; jangan mencetaknya ke log. Kirim access token untuk endpoint terproteksi:
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+Panggil `GET /api/auth/me` setelah login atau saat memulihkan session untuk memverifikasi pengguna dan memuat profil. Login dapat mengembalikan 403 jika email belum diverifikasi atau akun tidak aktif, 401 untuk kredensial salah, dan 429 saat rate limit tercapai. Validasi request yang gagal mengembalikan 400.
+
 Rate limiting in-memory diterapkan pada endpoint register dan login. Untuk deployment multi-instance, gunakan store rate-limit bersama.
 
 Migration trigger dan RLS di `supabase/migrations/` **tidak dijalankan otomatis**. Periksa trigger `auth.users` dan policies pada tabel target terlebih dahulu; migration memiliki preflight yang berhenti jika menemukan trigger/policy lain. Jalankan SQL secara manual di Supabase SQL Editor dengan urutan timestamp. Setelah migration diterapkan, `supabase/tests/auth_rls.sql` menguji akses positif dan isolasi negatif; ganti placeholder UUID dengan akun tes APPLICANT dan COMPANY yang sudah ada.
@@ -35,20 +77,35 @@ Migration trigger dan RLS di `supabase/migrations/` **tidak dijalankan otomatis*
 
 - `src/routes/` memetakan URL ke controller.
 - `src/controllers/` menangani request dan response HTTP.
-- `src/services/` menangani logika aplikasi; health service menyediakan status service.
-- `src/repositories/` disiapkan untuk akses data pada tahap berikutnya.
+- `src/services/` menangani logika aplikasi termasuk aturan status lowongan.
+- `src/repositories/` menangani akses data Supabase.
 - `src/middlewares/` menangani route yang tidak ditemukan dan error global.
 - `src/config/` memvalidasi environment dengan Zod dan menyediakan Supabase JS.
 - `src/app.ts` menginisialisasi Express tanpa membuka port agar mudah diuji.
 - `src/server.ts` memuat environment dan menjalankan HTTP server.
 
-Folder `validators/`, `types/`, `utils/`, serta `supabase/migrations/` disiapkan untuk pengembangan berikutnya. Belum ada repository/database operation, migration, seed, atau autentikasi pada foundation ini.
+Authentication dan Jobs API menggunakan struktur routes → middleware → controllers → services → repositories. `validators/` dan `types/` berisi kontrak request serta model yang digunakan kedua modul. Migration yang tersedia tetap perlu ditinjau dan dijalankan secara manual; server tidak menjalankan migration atau seed otomatis.
 
 ## Endpoint
 
 | Method | Path | Keterangan |
 | --- | --- | --- |
 | GET | `/api/health` | Status aplikasi (tidak menguji koneksi database) |
+| GET | `/api/jobs` | Lowongan publik ACTIVE dan belum melewati deadline; query: `page`, `pageSize`, `search`, `employmentType`, `location` |
+| GET | `/api/jobs/:id` | Detail lowongan publik ACTIVE dan belum melewati deadline |
+| POST | `/api/company/jobs` | COMPANY terautentikasi membuat lowongan DRAFT |
+| GET | `/api/company/jobs` | COMPANY terautentikasi melihat lowongan sendiri; query: `page`, `pageSize` |
+| PATCH | `/api/company/jobs/:id` | COMPANY pemilik memperbarui `title`, `employmentType`, `location`, atau `deadline` |
+| PATCH | `/api/company/jobs/:id/status` | COMPANY pemilik mengubah status dengan aturan transisi |
+
+Jobs hanya memakai kolom yang terdokumentasi pada [docs/database-schema.md](./docs/database-schema.md). Transisi status yang diizinkan adalah `DRAFT -> ACTIVE`, `DRAFT -> CLOSED`, dan `ACTIVE -> CLOSED`; `CLOSED` terminal. Publikasi memerlukan `verification_status = VERIFIED` serta deadline yang tidak lewat. Lowongan dengan deadline sebelum tanggal UTC saat ini tidak ditampilkan publik.
+
+Jobs API memakai Supabase Admin Client hanya di backend. Karena client administratif melewati RLS, setiap query publik membatasi status/deadline dan setiap query perusahaan membatasi kepemilikan dari user ID pada JWT terverifikasi. Tidak ada migration atau RLS policy baru pada implementasi ini. Jangan memakai secret key di frontend.
+
+## Technical debt
+
+- Perubahan status Jobs saat ini membaca status dan verifikasi lalu memperbarui row dalam operasi terpisah. Tambahkan compare-and-set/transaksi agar request bersamaan tidak melewati aturan transisi atau status verifikasi.
+- Endpoint publik `GET /api/jobs` belum memiliki rate limit khusus dan menghitung total secara exact. Evaluasi rate limit/cache serta strategi pagination/count sebelum beban produksi meningkat.
 
 ## Environment
 
@@ -56,8 +113,8 @@ Salin `.env.example` ke `.env`, lalu isi:
 
 - `NODE_ENV`, `PORT`, dan `CORS_ORIGIN` untuk server lokal dan konfigurasi CORS.
 - `SUPABASE_PROJECT_ID`, `SUPABASE_URL`, dan `SUPABASE_PUBLISHABLE_KEY` untuk koneksi project Supabase. Variabel Supabase opsional untuk health check.
-- `SUPABASE_SECRET_KEY` hanya server-side. `npm run check:supabase` memerlukannya untuk query read-only roles menggunakan Admin Client.
+- `SUPABASE_SECRET_KEY` hanya server-side dan digunakan Admin Client untuk operasi Jobs serta pemeriksaan read-only oleh `npm run check:supabase`.
 
 Publishable key harus berprefix `sb_publishable_` dan secret key harus berprefix `sb_secret_`. Jika Supabase belum dikonfigurasi lalu kode meminta client database, konfigurasi akan menghasilkan error yang jelas. Tidak ada koneksi atau data palsu. Admin Client hanya digunakan oleh trusted backend code dan tidak diekspos melalui API.
 
-Jangan commit `.env` atau credential. Backend ini belum melakukan otorisasi request; Supabase secret key tidak digunakan untuk operasi data.
+Jangan commit `.env` atau credential. Endpoint COMPANY memverifikasi JWT dan role melalui middleware yang sudah tersedia.

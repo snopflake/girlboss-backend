@@ -4,15 +4,22 @@ import type { AuthServiceContract } from "../services/auth.service.js";
 import { createAuthRouter } from "./auth.routes.js";
 import healthRouter from "./health.routes.js";
 import { createRoleTestRouter } from "./role-test.routes.js";
+import { createJobsRouter } from "./jobs.routes.js";
+import type { JobsServiceContract } from "../services/jobs.service.js";
 
 export function createApiRouter(
   environment: Environment["NODE_ENV"],
   authService: AuthServiceContract,
+  jobsService: JobsServiceContract,
 ) {
   const apiRouter = Router();
 
   apiRouter.use("/health", healthRouter);
   apiRouter.use("/auth", createAuthRouter(authService));
+  apiRouter.use(
+    "/",
+    createJobsRouter(authService, jobsService),
+  );
 
   if (environment === "development") {
     apiRouter.use("/", createRoleTestRouter(authService));
