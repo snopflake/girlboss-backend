@@ -25,6 +25,9 @@ import {
   ApplicationsService,
 } from "./services/applications.service.js";
 import type { ApplicationsServiceContract } from "./services/applications.service.js";
+import { SupabaseSavedJobsRepository } from "./repositories/saved-jobs.repository.js";
+import { SavedJobsService } from "./services/saved-jobs.service.js";
+import type { SavedJobsServiceContract } from "./services/saved-jobs.service.js";
 
 type AppConfig = Pick<Environment, "CORS_ORIGIN"> &
   Partial<
@@ -43,6 +46,7 @@ export function createApp(
   ),
   cvService?: CvServiceContract,
   applicationsService?: ApplicationsServiceContract,
+  savedJobsService?: SavedJobsServiceContract,
 ) {
   const app = express();
   const maxFileSizeBytes =
@@ -58,6 +62,9 @@ export function createApp(
   const resolvedApplicationsService =
     applicationsService ??
     new ApplicationsService(new SupabaseApplicationsRepository());
+  const resolvedSavedJobsService =
+    savedJobsService ??
+    new SavedJobsService(new SupabaseSavedJobsRepository());
 
   app.use(cors({ origin: config.CORS_ORIGIN }));
   app.use(express.json({ limit: "1mb" }));
@@ -71,6 +78,7 @@ export function createApp(
       resolvedCvService,
       maxFileSizeBytes,
       resolvedApplicationsService,
+      resolvedSavedJobsService,
     ),
   );
   app.use(notFoundMiddleware);

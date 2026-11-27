@@ -12,6 +12,8 @@ import { createCvRouter } from "./cv.routes.js";
 import type { CvServiceContract } from "../services/cv.service.js";
 import { createApplicationsRouter } from "./applications.routes.js";
 import type { ApplicationsServiceContract } from "../services/applications.service.js";
+import { createSavedJobsRouter } from "./saved-jobs.routes.js";
+import type { SavedJobsServiceContract } from "../services/saved-jobs.service.js";
 
 export function createApiRouter(
   environment: Environment["NODE_ENV"],
@@ -21,6 +23,7 @@ export function createApiRouter(
   cvService: CvServiceContract,
   cvMaxFileSizeBytes: number,
   applicationsService: ApplicationsServiceContract,
+  savedJobsService: SavedJobsServiceContract,
 ) {
   const apiRouter = Router();
 
@@ -41,6 +44,10 @@ export function createApiRouter(
   apiRouter.use(
     "/",
     createApplicationsRouter(authService, applicationsService),
+  );
+  apiRouter.use(
+    "/",
+    createSavedJobsRouter(authService, savedJobsService),
   );
 
   if (environment === "development") {
