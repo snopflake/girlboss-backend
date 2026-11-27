@@ -14,6 +14,8 @@ import { createApplicationsRouter } from "./applications.routes.js";
 import type { ApplicationsServiceContract } from "../services/applications.service.js";
 import { createSavedJobsRouter } from "./saved-jobs.routes.js";
 import type { SavedJobsServiceContract } from "../services/saved-jobs.service.js";
+import { createEventsRouter } from "./events.routes.js";
+import type { EventsServiceContract } from "../services/events.service.js";
 
 export function createApiRouter(
   environment: Environment["NODE_ENV"],
@@ -24,6 +26,7 @@ export function createApiRouter(
   cvMaxFileSizeBytes: number,
   applicationsService: ApplicationsServiceContract,
   savedJobsService: SavedJobsServiceContract,
+  eventsService: EventsServiceContract,
 ) {
   const apiRouter = Router();
 
@@ -49,6 +52,7 @@ export function createApiRouter(
     "/",
     createSavedJobsRouter(authService, savedJobsService),
   );
+  apiRouter.use("/", createEventsRouter(eventsService));
 
   if (environment === "development") {
     apiRouter.use("/", createRoleTestRouter(authService));

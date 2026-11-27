@@ -16,7 +16,7 @@ Skrip yang tersedia:
 - `npm run lint` menjalankan ESLint.
 - `npm run typecheck` memeriksa tipe TypeScript, termasuk test.
 - `npm run check:supabase` memeriksa konektivitas Supabase dan membaca roles secara read-only. Memerlukan seluruh variabel Supabase pada `.env`; skrip ini bukan endpoint API.
-- `npm test` menjalankan integration test health, authentication, Jobs, Profile, CV, dan Job Applications API dengan test runner bawaan Node.js.
+- `npm test` menjalankan integration test health, authentication, Jobs, Profile, CV, Job Applications, Saved Jobs, dan Events API dengan test runner bawaan Node.js.
 
 ## Authentication
 
@@ -109,6 +109,8 @@ Authentication dan Jobs API menggunakan struktur routes → middleware → contr
 | GET | `/api/applicant/saved-jobs` | APPLICANT melihat lowongan tersimpan sendiri; query: `page`, `pageSize` |
 | POST | `/api/applicant/saved-jobs` | APPLICANT menyimpan lowongan ACTIVE dengan `jobId` |
 | DELETE | `/api/applicant/saved-jobs/:jobId` | APPLICANT menghapus lowongan tersimpan miliknya |
+| GET | `/api/events` | Daftar event berstatus `PUBLISHED`; query: `page`, `pageSize`, `category`, `eventType`, `search` |
+| GET | `/api/events/:id` | Detail event berstatus `PUBLISHED`; event dengan status lain tidak tersedia untuk publik |
 | POST | `/api/applications` | APPLICANT mengirim lamaran dengan `jobId`, `cvId`, dan optional `coverLetter` |
 | GET | `/api/applications` | APPLICANT melihat riwayat lamaran sendiri; query: `page`, `pageSize`, `status` |
 | GET | `/api/applications/:id` | APPLICANT melihat detail lamaran miliknya |
