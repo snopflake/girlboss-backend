@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:supabase": "tsx scripts/check-supabase.ts",
-    "test": "node --import tsx --test tests/health.integration.test.ts tests/auth.routes.test.ts tests/jobs.routes.test.ts tests/profile.routes.test.ts tests/cv.routes.test.ts"
+    "test": "node --import tsx --test tests/health.integration.test.ts tests/auth.routes.test.ts tests/jobs.routes.test.ts tests/profile.routes.test.ts tests/cv.routes.test.ts tests/applications.routes.test.ts"
   },
   "keywords": [],
   "author": "",

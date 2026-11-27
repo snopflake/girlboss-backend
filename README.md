@@ -16,7 +16,7 @@ Skrip yang tersedia:
 - `npm run lint` menjalankan ESLint.
 - `npm run typecheck` memeriksa tipe TypeScript, termasuk test.
 - `npm run check:supabase` memeriksa konektivitas Supabase dan membaca roles secara read-only. Memerlukan seluruh variabel Supabase pada `.env`; skrip ini bukan endpoint API.
-- `npm test` menjalankan integration test health, authentication, dan Jobs API dengan test runner bawaan Node.js.
+- `npm test` menjalankan integration test health, authentication, Jobs, Profile, CV, dan Job Applications API dengan test runner bawaan Node.js.
 
 ## Authentication
 
@@ -106,10 +106,18 @@ Authentication dan Jobs API menggunakan struktur routes → middleware → contr
 | GET | `/api/applicant/cvs/:id` | APPLICANT melihat metadata CV miliknya |
 | GET | `/api/applicant/cvs/:id/download` | APPLICANT memperoleh signed URL privat dengan masa berlaku 60 detik |
 | DELETE | `/api/applicant/cvs/:id` | Menghapus CV milik sendiri jika belum direferensikan lamaran atau analisis CV |
+| POST | `/api/applications` | APPLICANT mengirim lamaran dengan `jobId`, `cvId`, dan optional `coverLetter` |
+| GET | `/api/applications` | APPLICANT melihat riwayat lamaran sendiri; query: `page`, `pageSize`, `status` |
+| GET | `/api/applications/:id` | APPLICANT melihat detail lamaran miliknya |
+| GET | `/api/company/applications` | COMPANY melihat lamaran pada lowongan miliknya; query: `page`, `pageSize`, `status` |
+| GET | `/api/company/applications/:id` | COMPANY pemilik lowongan melihat detail lamaran |
+| PATCH | `/api/company/applications/:id/status` | COMPANY pemilik lowongan memperbarui status lamaran dengan transisi yang diizinkan |
 
 Profile endpoints memakai identitas pengguna dari JWT terverifikasi. Respons memuat `fullName` dari identitas akun, tetapi endpoint PATCH tidak mengubah `users.full_name`. Field PATCH divalidasi secara ketat; field kepemilikan, role, status akun, dan status verifikasi tidak dapat diubah. PATCH menggunakan Admin Client dengan filter `user_id` pemilik dari JWT karena grant/RLS database untuk `authenticated` hanya mengizinkan SELECT.
 
 CV disimpan pada bucket privat `applicant-documents` di prefix `{applicant_profile_id}/cvs/`; response API hanya mengembalikan metadata, bukan `storage_key`. Prefix tersebut membedakan CV yang dikelola API ini dari dokumen applicant lain pada tabel generik yang sama. File PDF dan DOCX diverifikasi berdasarkan MIME, ekstensi, dan signature/container; batas ukuran default 10 MiB dan batas jumlah default 5 file per applicant. Konfigurasi dapat diubah melalui `CV_MAX_FILE_SIZE_BYTES` (maksimum 10 MiB, sesuai bucket) dan `CV_MAX_PER_APPLICANT`. Unduhan memakai signed URL berdurasi pendek. Metadata disimpan pada `public.application_documents` dengan `applicant_id` yang berasal dari profil applicant milik JWT.
+
+Job Applications memakai profil applicant/perusahaan yang di-resolve dari JWT. Pengiriman lamaran menggunakan RPC `submit_job_application` agar pemeriksaan lowongan ACTIVE/deadline, kepemilikan CV, insert lamaran, dan tautan CV berlangsung atomik; database juga membatasi satu lamaran per applicant dan lowongan. Daftar memakai pagination. Respons company hanya menyertakan nama dan headline applicant serta metadata CV yang diperlukan; `storage_key` tidak pernah dikembalikan. Transisi status: `TERKIRIM -> DITINJAU/DITOLAK`, `DITINJAU -> WAWANCARA/DITERIMA/DITOLAK`, dan `WAWANCARA -> DITERIMA/DITOLAK`; `DITERIMA` serta `DITOLAK` terminal. Update status menggunakan conditional update sehingga perubahan bersamaan yang memakai status lama ditolak sebagai konflik.
 
 Jobs hanya memakai kolom yang terdokumentasi pada [docs/database-schema.md](./docs/database-schema.md). Transisi status yang diizinkan adalah `DRAFT -> ACTIVE`, `DRAFT -> CLOSED`, dan `ACTIVE -> CLOSED`; `CLOSED` terminal. Publikasi memerlukan `verification_status = VERIFIED` serta deadline yang tidak lewat. Lowongan dengan deadline sebelum tanggal UTC saat ini tidak ditampilkan publik.
 

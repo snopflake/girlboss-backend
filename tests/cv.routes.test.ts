@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { test } from "node:test";
 import { createApp } from "../src/app.js";
 import type { CvRepositoryContract } from "../src/repositories/cv.repository.js";
+import { toCvDeleteHttpError } from "../src/repositories/cv.repository.js";
 import { CvService } from "../src/services/cv.service.js";
 import type { AuthServiceContract } from "../src/services/auth.service.js";
 import type { AuthenticatedUser } from "../src/types/auth.types.js";
@@ -81,6 +82,7 @@ function createMemoryCvRepository(): CvRepositoryContract & {
   failUpload: boolean;
   failInsert: boolean;
   failCleanup: boolean;
+  deleteError: HttpError | null;
 } {
   const documents = new Map<string, CvDocumentRecord>();
   const objects = new Map<string, Buffer>();
@@ -99,6 +101,7 @@ function createMemoryCvRepository(): CvRepositoryContract & {
     failUpload: false,
     failInsert: false,
     failCleanup: false,
+    deleteError: null,
     async findApplicantProfileId(userId: string) {
       if (userId === applicantAId) return applicantProfileAId;
       if (userId === applicantBId) return applicantProfileBId;
@@ -151,6 +154,9 @@ function createMemoryCvRepository(): CvRepositoryContract & {
       return analyzedDocumentIds.has(documentId) ? 1 : 0;
     },
     async deleteDocument(id: string, applicantId: string) {
+      if (repository.deleteError) {
+        throw repository.deleteError;
+      }
       const document = documents.get(id);
       if (
         !document ||
@@ -472,6 +478,49 @@ test("CV deletion is blocked while referenced by a CV analysis", async () => {
       method: "DELETE",
       headers: auth("applicant-a-token"),
     });
+    assert.equal(response.status, 409);
+    assert.equal(repository.documents.has(cvAId), true);
+    assert.equal(repository.objects.has(`${applicantProfileAId}/cvs/${cvAId}.pdf`), true);
+    assert.deepEqual(repository.removedKeys, []);
+  });
+});
+
+test("only known CV reference foreign keys map to delete conflicts", () => {
+  const applicationLinkError = toCvDeleteHttpError({
+    code: "23503",
+    constraint: "application_document_links_document_id_fkey",
+  });
+  const analysisLinkError = toCvDeleteHttpError({
+    code: "23503",
+    details: 'Key (id) is still referenced from table "cv_analyses".',
+  });
+  const unrelatedForeignKeyError = toCvDeleteHttpError({
+    code: "23503",
+    constraint: "unrelated_document_reference_fkey",
+  });
+  const nonForeignKeyError = toCvDeleteHttpError({
+    code: "08006",
+    details: 'table "cv_analyses"',
+  });
+
+  assert.equal(applicationLinkError.status, 409);
+  assert.equal(analysisLinkError.status, 409);
+  assert.equal(unrelatedForeignKeyError.status, 503);
+  assert.equal(nonForeignKeyError.status, 503);
+});
+
+test("a database reference conflict leaves the CV file in Storage", async () => {
+  await withCvServer(async (baseUrl, repository) => {
+    repository.deleteError = toCvDeleteHttpError({
+      code: "23503",
+      constraint: "application_document_links_document_id_fkey",
+    });
+
+    const response = await fetch(`${baseUrl}/api/applicant/cvs/${cvAId}`, {
+      method: "DELETE",
+      headers: auth("applicant-a-token"),
+    });
+
     assert.equal(response.status, 409);
     assert.equal(repository.documents.has(cvAId), true);
     assert.equal(repository.objects.has(`${applicantProfileAId}/cvs/${cvAId}.pdf`), true);

@@ -10,6 +10,8 @@ import { createProfileRouter } from "./profile.routes.js";
 import type { ProfileServiceContract } from "../services/profile.service.js";
 import { createCvRouter } from "./cv.routes.js";
 import type { CvServiceContract } from "../services/cv.service.js";
+import { createApplicationsRouter } from "./applications.routes.js";
+import type { ApplicationsServiceContract } from "../services/applications.service.js";
 
 export function createApiRouter(
   environment: Environment["NODE_ENV"],
@@ -18,6 +20,7 @@ export function createApiRouter(
   profileService: ProfileServiceContract,
   cvService: CvServiceContract,
   cvMaxFileSizeBytes: number,
+  applicationsService: ApplicationsServiceContract,
 ) {
   const apiRouter = Router();
 
@@ -34,6 +37,10 @@ export function createApiRouter(
   apiRouter.use(
     "/",
     createJobsRouter(authService, jobsService),
+  );
+  apiRouter.use(
+    "/",
+    createApplicationsRouter(authService, applicationsService),
   );
 
   if (environment === "development") {

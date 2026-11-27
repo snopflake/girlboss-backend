@@ -78,6 +78,25 @@ function throwDatabaseError(message: string): never {
   throw new HttpError(503, message);
 }
 
+export function toCvDeleteHttpError(error: unknown): HttpError {
+  if (
+    isRecord(error) &&
+    error.code === "23503" &&
+    [error.constraint, error.details, error.message].some(
+      (value) =>
+        typeof value === "string" &&
+        /(application_document_links|cv_analyses)/i.test(value),
+    )
+  ) {
+    return new HttpError(
+      409,
+      "CV tidak dapat dihapus karena masih direferensikan oleh lamaran atau analisis.",
+    );
+  }
+
+  return new HttpError(503, "Metadata CV tidak dapat dihapus.");
+}
+
 async function executeDatabaseRequest<T>(
   createRequest: () => PromiseLike<T>,
   errorMessage: string,
@@ -233,7 +252,7 @@ export class SupabaseCvRepository implements CvRepositoryContract {
       "Metadata CV tidak dapat dihapus.",
     );
     if (error) {
-      throwDatabaseError("Metadata CV tidak dapat dihapus.");
+      throw toCvDeleteHttpError(error);
     }
     return data !== null;
   }
