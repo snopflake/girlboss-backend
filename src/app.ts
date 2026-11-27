@@ -36,6 +36,11 @@ import { CvAnalysesService } from "./services/cv-analyses.service.js";
 import type { CvAnalysesServiceContract } from "./services/cv-analyses.service.js";
 import { CvTextExtractor } from "./services/cv-text-extractor.js";
 import { GeminiCvAnalyzer } from "./services/gemini-cv-analyzer.js";
+import { SupabaseInterviewSessionsRepository } from "./repositories/interview-sessions.repository.js";
+import { InterviewSessionsService } from "./services/interview-sessions.service.js";
+import type { InterviewSessionsServiceContract } from "./services/interview-sessions.service.js";
+import { GeminiJsonGenerator } from "./services/gemini-json-generator.js";
+import { GeminiInterviewProvider } from "./services/gemini-interview-provider.js";
 
 type AppConfig = Pick<Environment, "CORS_ORIGIN"> &
   Partial<
@@ -61,6 +66,7 @@ export function createApp(
   savedJobsService?: SavedJobsServiceContract,
   eventsService?: EventsServiceContract,
   cvAnalysesService?: CvAnalysesServiceContract,
+  interviewSessionsService?: InterviewSessionsServiceContract,
 ) {
   const app = express();
   const maxFileSizeBytes =
@@ -89,6 +95,14 @@ export function createApp(
       new CvTextExtractor(),
       new GeminiCvAnalyzer(config.GEMINI_API_KEY, config.GEMINI_MODEL),
     );
+  const resolvedInterviewSessionsService =
+    interviewSessionsService ??
+    new InterviewSessionsService(
+      new SupabaseInterviewSessionsRepository(),
+      new GeminiInterviewProvider(
+        new GeminiJsonGenerator(config.GEMINI_API_KEY, config.GEMINI_MODEL),
+      ),
+    );
 
   app.use(cors({ origin: config.CORS_ORIGIN }));
   app.use(express.json({ limit: "1mb" }));
@@ -105,6 +119,7 @@ export function createApp(
       resolvedSavedJobsService,
       resolvedEventsService,
       resolvedCvAnalysesService,
+      resolvedInterviewSessionsService,
     ),
   );
   app.use(notFoundMiddleware);
