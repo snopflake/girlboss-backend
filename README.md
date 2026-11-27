@@ -88,35 +88,45 @@ Authentication dan Jobs API menggunakan struktur routes → middleware → contr
 
 ## Endpoint
 
-| Method | Path | Keterangan |
-| --- | --- | --- |
-| GET | `/api/health` | Status aplikasi (tidak menguji koneksi database) |
-| GET | `/api/jobs` | Lowongan publik ACTIVE dan belum melewati deadline; query: `page`, `pageSize`, `search`, `employmentType`, `location` |
-| GET | `/api/jobs/:id` | Detail lowongan publik ACTIVE dan belum melewati deadline |
-| POST | `/api/company/jobs` | COMPANY terautentikasi membuat lowongan DRAFT |
-| GET | `/api/company/jobs` | COMPANY terautentikasi melihat lowongan sendiri; query: `page`, `pageSize` |
-| PATCH | `/api/company/jobs/:id` | COMPANY pemilik memperbarui `title`, `employmentType`, `location`, atau `deadline` |
-| PATCH | `/api/company/jobs/:id/status` | COMPANY pemilik mengubah status dengan aturan transisi |
-| GET | `/api/applicant/profile` | APPLICANT terautentikasi membaca profilnya |
-| PATCH | `/api/applicant/profile` | APPLICANT memperbarui `headline`, `phoneNumber`, dan/atau `professionalSummary` |
-| GET | `/api/company/profile` | COMPANY terautentikasi membaca profilnya |
-| PATCH | `/api/company/profile` | COMPANY memperbarui `companyName` dan/atau `industry` |
-| GET | `/api/applicant/cvs` | APPLICANT melihat metadata CV miliknya |
-| POST | `/api/applicant/cvs` | APPLICANT mengunggah satu file CV melalui multipart field `file` |
-| GET | `/api/applicant/cvs/:id` | APPLICANT melihat metadata CV miliknya |
-| GET | `/api/applicant/cvs/:id/download` | APPLICANT memperoleh signed URL privat dengan masa berlaku 60 detik |
-| DELETE | `/api/applicant/cvs/:id` | Menghapus CV milik sendiri jika belum direferensikan lamaran atau analisis CV |
-| GET | `/api/applicant/saved-jobs` | APPLICANT melihat lowongan tersimpan sendiri; query: `page`, `pageSize` |
-| POST | `/api/applicant/saved-jobs` | APPLICANT menyimpan lowongan ACTIVE dengan `jobId` |
-| DELETE | `/api/applicant/saved-jobs/:jobId` | APPLICANT menghapus lowongan tersimpan miliknya |
-| GET | `/api/events` | Daftar event berstatus `PUBLISHED`; query: `page`, `pageSize`, `category`, `eventType`, `search` |
-| GET | `/api/events/:id` | Detail event berstatus `PUBLISHED`; event dengan status lain tidak tersedia untuk publik |
-| POST | `/api/applications` | APPLICANT mengirim lamaran dengan `jobId`, `cvId`, dan optional `coverLetter` |
-| GET | `/api/applications` | APPLICANT melihat riwayat lamaran sendiri; query: `page`, `pageSize`, `status` |
-| GET | `/api/applications/:id` | APPLICANT melihat detail lamaran miliknya |
-| GET | `/api/company/applications` | COMPANY melihat lamaran pada lowongan miliknya; query: `page`, `pageSize`, `status` |
-| GET | `/api/company/applications/:id` | COMPANY pemilik lowongan melihat detail lamaran |
-| PATCH | `/api/company/applications/:id/status` | COMPANY pemilik lowongan memperbarui status lamaran dengan transisi yang diizinkan |
+Semua endpoint berada di bawah prefix `/api`. Kecuali upload CV, body request menggunakan JSON. Semua response sukses memakai envelope `{ "success": true, "message": "...", "data": ... }`. Error memakai `{ "success": false, "message": "...", "errors": ... }`; `errors` berisi detail validasi atau `null`. Request terproteksi mengirim `Authorization: Bearer <accessToken>`.
+
+| Method | Path | Akses | Request penting | Bentuk `data` sukses |
+| --- | --- | --- | --- | --- |
+| GET | `/api/health` | Publik | — | Status health |
+| POST | `/api/auth/register` | Publik | JSON: `fullName`, `email`, `password`, `accountType`; `companyName` wajib untuk COMPANY | `null` (HTTP 202) |
+| POST | `/api/auth/login` | Publik | JSON: `email`, `password` | `user`, `accessToken`, `refreshToken`, `expiresIn` |
+| GET | `/api/auth/me` | JWT, semua role | Bearer token | Pengguna dan profil saat ini |
+| GET | `/api/jobs` | Publik | Query: `page`, `pageSize`, `search`, `employmentType`, `location` | `jobs[]`, `pagination` |
+| GET | `/api/jobs/:id` | Publik | UUID `id` | Objek lowongan |
+| POST | `/api/company/jobs` | COMPANY | JSON: `title`; opsional `employmentType`, `location`, `deadline` | Objek lowongan DRAFT (HTTP 201) |
+| GET | `/api/company/jobs` | COMPANY | Query: `page`, `pageSize` | `jobs[]`, `pagination` |
+| PATCH | `/api/company/jobs/:id` | COMPANY pemilik lowongan | JSON: field yang diubah dari `title`, `employmentType`, `location`, `deadline` | Objek lowongan |
+| PATCH | `/api/company/jobs/:id/status` | COMPANY pemilik lowongan | JSON: `{ "status": "ACTIVE" }` atau status transisi valid lainnya | Objek lowongan |
+| GET | `/api/applicant/profile` | APPLICANT | Bearer token | Profil termasuk `fullName` |
+| PATCH | `/api/applicant/profile` | APPLICANT | JSON: `headline`, `phoneNumber`, `professionalSummary` | Profil terbaru |
+| GET | `/api/company/profile` | COMPANY | Bearer token | Profil termasuk `fullName` |
+| PATCH | `/api/company/profile` | COMPANY | JSON: `companyName`, `industry` | Profil terbaru |
+| GET | `/api/applicant/cvs` | APPLICANT | Bearer token | `cvs[]` metadata (`id`, `fileName`, `fileSize`, `mimeType`) |
+| POST | `/api/applicant/cvs` | APPLICANT | `multipart/form-data`, satu file pada field `file`; PDF/DOCX | Metadata CV (HTTP 201) |
+| GET | `/api/applicant/cvs/:id` | APPLICANT, pemilik CV | UUID `id` | Metadata CV |
+| GET | `/api/applicant/cvs/:id/download` | APPLICANT, pemilik CV | UUID `id` | `signedUrl`, `expiresIn` (60 detik) |
+| DELETE | `/api/applicant/cvs/:id` | APPLICANT, pemilik CV | UUID `id` | `{ "id": "..." }` |
+| GET | `/api/applicant/saved-jobs` | APPLICANT | Query: `page`, `pageSize` | `savedJobs[]`, `pagination` |
+| POST | `/api/applicant/saved-jobs` | APPLICANT | JSON: `{ "jobId": "<uuid>" }` | `{ "jobId": "..." }` (HTTP 201) |
+| DELETE | `/api/applicant/saved-jobs/:jobId` | APPLICANT, pemilik simpanan | UUID `jobId` | `{ "jobId": "..." }` |
+| GET | `/api/events` | Publik | Query: `page`, `pageSize`, `category`, `eventType`, `search` | `events[]`, `pagination` |
+| GET | `/api/events/:id` | Publik | UUID `id` | Objek event berstatus `PUBLISHED` |
+| POST | `/api/applications` | APPLICANT | JSON: `jobId`, `cvId`, opsional `coverLetter` | `id`, `jobId`, `cvId`, `status`, `submittedAt` (HTTP 201) |
+| GET | `/api/applications` | APPLICANT | Query: `page`, `pageSize`, `status` | `applications[]`, `pagination` |
+| GET | `/api/applications/:id` | APPLICANT, pemilik lamaran | UUID `id` | Detail lamaran dan lowongan |
+| GET | `/api/company/applications` | COMPANY | Query: `page`, `pageSize`, `status` | `applications[]`, `pagination` |
+| GET | `/api/company/applications/:id` | COMPANY pemilik lowongan | UUID `id` | Detail lamaran, ringkasan applicant, dan metadata CV |
+| PATCH | `/api/company/applications/:id/status` | COMPANY pemilik lowongan | JSON: `{ "status": "<status/transisi valid>" }` | Detail lamaran terbaru |
+| GET | `/api/applicant/test` | APPLICANT; development saja | Bearer token | `null` |
+| GET | `/api/company/test` | COMPANY; development saja | Bearer token | `null` |
+| GET | `/api/admin/test` | ADMIN; development saja | Bearer token | `null` |
+
+Query pagination menggunakan `page` (default 1) dan `pageSize` (default 20, maksimum 100). Request PATCH profil/job harus memuat setidaknya satu field yang diizinkan. Validasi gagal menghasilkan HTTP 400; error umum mencakup 401 (belum login), 403 (role tidak sesuai), 404 (resource tidak tersedia/tidak dimiliki), 409 (konflik), dan 503 (layanan database/storage).
 
 Profile endpoints memakai identitas pengguna dari JWT terverifikasi. Respons memuat `fullName` dari identitas akun, tetapi endpoint PATCH tidak mengubah `users.full_name`. Field PATCH divalidasi secara ketat; field kepemilikan, role, status akun, dan status verifikasi tidak dapat diubah. PATCH menggunakan Admin Client dengan filter `user_id` pemilik dari JWT karena grant/RLS database untuk `authenticated` hanya mengizinkan SELECT.
 
@@ -129,6 +139,14 @@ Saved Jobs memakai identitas APPLICANT dari JWT dan menyimpan relasi pada `publi
 Jobs hanya memakai kolom yang terdokumentasi pada [docs/database-schema.md](./docs/database-schema.md). Transisi status yang diizinkan adalah `DRAFT -> ACTIVE`, `DRAFT -> CLOSED`, dan `ACTIVE -> CLOSED`; `CLOSED` terminal. Publikasi memerlukan `verification_status = VERIFIED` serta deadline yang tidak lewat. Lowongan dengan deadline sebelum tanggal UTC saat ini tidak ditampilkan publik.
 
 Jobs API memakai Supabase Admin Client hanya di backend. Karena client administratif melewati RLS, setiap query publik membatasi status/deadline dan setiap query perusahaan membatasi kepemilikan dari user ID pada JWT terverifikasi. Tidak ada migration atau RLS policy baru pada implementasi ini. Jangan memakai secret key di frontend.
+
+## Keterbatasan integrasi
+
+- Events bersifat read-only; belum ada endpoint pendaftaran event. Hanya status `PUBLISHED` yang dipublikasikan. Pemeriksaan terakhir tidak menemukan baris event, sehingga daftar dapat kosong sampai data tersedia.
+- Profile PATCH tidak mengubah `users.full_name`; `fullName` hanya dibaca dari identitas pengguna.
+- Saved Jobs memeriksa status `ACTIVE` sebelum insert dalam dua operasi terpisah. Perubahan status lowongan yang berbarengan dapat menimbulkan race window; jaminan atomik memerlukan mekanisme database tambahan.
+- Login mengembalikan `refreshToken`, tetapi backend belum menyediakan endpoint refresh. Jika frontend mengelola refresh melalui Supabase SDK, konsistenkan satu pengelola session dan jangan mengirim token ke log.
+- Belum ada endpoint Notifications maupun pendaftaran event; keduanya tidak termasuk API yang tersedia.
 
 ## Technical debt
 
