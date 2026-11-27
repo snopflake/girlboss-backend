@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:supabase": "tsx scripts/check-supabase.ts",
-    "test": "node --import tsx --test tests/health.integration.test.ts tests/auth.routes.test.ts tests/jobs.routes.test.ts tests/profile.routes.test.ts"
+    "test": "node --import tsx --test tests/health.integration.test.ts tests/auth.routes.test.ts tests/jobs.routes.test.ts tests/profile.routes.test.ts tests/cv.routes.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -22,13 +22,17 @@
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.5",
+    "multer": "^2.0.2",
+    "yauzl": "^3.2.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.0.11",
     "@types/node": "^26.6.6",
+    "@types/yauzl": "^2.10.3",
     "eslint": "^10.15.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",

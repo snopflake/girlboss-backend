@@ -1,6 +1,6 @@
 import type { ErrorRequestHandler } from "express";
 
-const supportedStatuses = [400, 401, 403, 404, 409, 422, 429, 503] as const;
+const supportedStatuses = [400, 401, 403, 404, 409, 413, 422, 429, 503] as const;
 
 function getErrorStatus(error: unknown): number {
   if (typeof error !== "object" || error === null || !("status" in error)) {

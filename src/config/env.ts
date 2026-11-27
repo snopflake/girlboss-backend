@@ -8,6 +8,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   CORS_ORIGIN: z.string().url().default("http://localhost:5173"),
+  CV_MAX_FILE_SIZE_BYTES: z.coerce.number().int().min(1).max(10 * 1024 * 1024).default(10 * 1024 * 1024),
+  CV_MAX_PER_APPLICANT: z.coerce.number().int().min(1).max(100).default(5),
   SUPABASE_PROJECT_ID: optionalValue(z.string().min(1)),
   SUPABASE_URL: optionalValue(z.string().url()),
   SUPABASE_PUBLISHABLE_KEY: optionalValue(z.string().startsWith("sb_publishable_")),

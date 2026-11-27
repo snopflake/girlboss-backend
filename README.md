@@ -101,8 +101,15 @@ Authentication dan Jobs API menggunakan struktur routes → middleware → contr
 | PATCH | `/api/applicant/profile` | APPLICANT memperbarui `headline`, `phoneNumber`, dan/atau `professionalSummary` |
 | GET | `/api/company/profile` | COMPANY terautentikasi membaca profilnya |
 | PATCH | `/api/company/profile` | COMPANY memperbarui `companyName` dan/atau `industry` |
+| GET | `/api/applicant/cvs` | APPLICANT melihat metadata CV miliknya |
+| POST | `/api/applicant/cvs` | APPLICANT mengunggah satu file CV melalui multipart field `file` |
+| GET | `/api/applicant/cvs/:id` | APPLICANT melihat metadata CV miliknya |
+| GET | `/api/applicant/cvs/:id/download` | APPLICANT memperoleh signed URL privat dengan masa berlaku 60 detik |
+| DELETE | `/api/applicant/cvs/:id` | Menghapus CV milik sendiri jika belum direferensikan lamaran atau analisis CV |
 
 Profile endpoints memakai identitas pengguna dari JWT terverifikasi. Respons memuat `fullName` dari identitas akun, tetapi endpoint PATCH tidak mengubah `users.full_name`. Field PATCH divalidasi secara ketat; field kepemilikan, role, status akun, dan status verifikasi tidak dapat diubah. PATCH menggunakan Admin Client dengan filter `user_id` pemilik dari JWT karena grant/RLS database untuk `authenticated` hanya mengizinkan SELECT.
+
+CV disimpan pada bucket privat `applicant-documents` di prefix `{applicant_profile_id}/cvs/`; response API hanya mengembalikan metadata, bukan `storage_key`. Prefix tersebut membedakan CV yang dikelola API ini dari dokumen applicant lain pada tabel generik yang sama. File PDF dan DOCX diverifikasi berdasarkan MIME, ekstensi, dan signature/container; batas ukuran default 10 MiB dan batas jumlah default 5 file per applicant. Konfigurasi dapat diubah melalui `CV_MAX_FILE_SIZE_BYTES` (maksimum 10 MiB, sesuai bucket) dan `CV_MAX_PER_APPLICANT`. Unduhan memakai signed URL berdurasi pendek. Metadata disimpan pada `public.application_documents` dengan `applicant_id` yang berasal dari profil applicant milik JWT.
 
 Jobs hanya memakai kolom yang terdokumentasi pada [docs/database-schema.md](./docs/database-schema.md). Transisi status yang diizinkan adalah `DRAFT -> ACTIVE`, `DRAFT -> CLOSED`, dan `ACTIVE -> CLOSED`; `CLOSED` terminal. Publikasi memerlukan `verification_status = VERIFIED` serta deadline yang tidak lewat. Lowongan dengan deadline sebelum tanggal UTC saat ini tidak ditampilkan publik.
 
@@ -120,6 +127,7 @@ Salin `.env.example` ke `.env`, lalu isi:
 - `NODE_ENV`, `PORT`, dan `CORS_ORIGIN` untuk server lokal dan konfigurasi CORS.
 - `SUPABASE_PROJECT_ID`, `SUPABASE_URL`, dan `SUPABASE_PUBLISHABLE_KEY` untuk koneksi project Supabase. Variabel Supabase opsional untuk health check.
 - `SUPABASE_SECRET_KEY` hanya server-side dan digunakan Admin Client untuk operasi Jobs serta pemeriksaan read-only oleh `npm run check:supabase`.
+- `CV_MAX_FILE_SIZE_BYTES` dan `CV_MAX_PER_APPLICANT` untuk mengatur batas upload CV (default masing-masing 10 MiB dan 5 file).
 
 Publishable key harus berprefix `sb_publishable_` dan secret key harus berprefix `sb_secret_`. Jika Supabase belum dikonfigurasi lalu kode meminta client database, konfigurasi akan menghasilkan error yang jelas. Tidak ada koneksi atau data palsu. Admin Client hanya digunakan oleh trusted backend code dan tidak diekspos melalui API.
 

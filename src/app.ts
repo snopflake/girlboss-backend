@@ -13,9 +13,21 @@ import type { JobsServiceContract } from "./services/jobs.service.js";
 import { SupabaseProfileRepository } from "./repositories/profile.repository.js";
 import { ProfileService } from "./services/profile.service.js";
 import type { ProfileServiceContract } from "./services/profile.service.js";
+import { SupabaseCvRepository } from "./repositories/cv.repository.js";
+import {
+  CvService,
+  DEFAULT_CV_MAX_FILE_SIZE_BYTES,
+  DEFAULT_CV_MAX_PER_APPLICANT,
+} from "./services/cv.service.js";
+import type { CvServiceContract } from "./services/cv.service.js";
 
 type AppConfig = Pick<Environment, "CORS_ORIGIN"> &
-  Partial<Pick<Environment, "NODE_ENV">>;
+  Partial<
+    Pick<
+      Environment,
+      "NODE_ENV" | "CV_MAX_FILE_SIZE_BYTES" | "CV_MAX_PER_APPLICANT"
+    >
+  >;
 
 export function createApp(
   config: AppConfig,
@@ -24,8 +36,19 @@ export function createApp(
   profileService: ProfileServiceContract = new ProfileService(
     new SupabaseProfileRepository(),
   ),
+  cvService?: CvServiceContract,
 ) {
   const app = express();
+  const maxFileSizeBytes =
+    config.CV_MAX_FILE_SIZE_BYTES ?? DEFAULT_CV_MAX_FILE_SIZE_BYTES;
+  const maxPerApplicant =
+    config.CV_MAX_PER_APPLICANT ?? DEFAULT_CV_MAX_PER_APPLICANT;
+  const resolvedCvService =
+    cvService ??
+    new CvService(new SupabaseCvRepository(), {
+      maxFileSizeBytes,
+      maxPerApplicant,
+    });
 
   app.use(cors({ origin: config.CORS_ORIGIN }));
   app.use(express.json({ limit: "1mb" }));
@@ -36,6 +59,8 @@ export function createApp(
       authService,
       jobsService,
       profileService,
+      resolvedCvService,
+      maxFileSizeBytes,
     ),
   );
   app.use(notFoundMiddleware);

@@ -6,6 +6,8 @@ try {
   const app = createApp({
     CORS_ORIGIN: env.CORS_ORIGIN,
     NODE_ENV: env.NODE_ENV,
+    CV_MAX_FILE_SIZE_BYTES: env.CV_MAX_FILE_SIZE_BYTES,
+    CV_MAX_PER_APPLICANT: env.CV_MAX_PER_APPLICANT,
   });
   const server = app.listen(env.PORT, () => {
     console.info(`GirlBoss API berjalan pada port ${env.PORT}`);
