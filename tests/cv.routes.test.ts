@@ -181,6 +181,13 @@ function createMemoryCvRepository(): CvRepositoryContract & {
       }
       objects.set(storageKey, Buffer.from(file));
     },
+    async downloadObject(storageKey: string) {
+      const file = objects.get(storageKey);
+      if (!file) {
+        throw new HttpError(503, "File CV tidak dapat diambil untuk analisis.");
+      }
+      return Buffer.from(file);
+    },
     async removeObject(storageKey: string) {
       removedKeys.push(storageKey);
       if (repository.failCleanup) {
@@ -596,5 +603,31 @@ test("maximum CV count is enforced per applicant", async () => {
       assert.equal(repository.objects.size, 2);
     },
     { maxPerApplicant: 1 },
+  );
+});
+
+test("analysis file retrieval downloads only the current applicant's private CV", async () => {
+  const repository = createMemoryCvRepository();
+  const sourceBuffer = Buffer.from("%PDF-1.7 test");
+  const storedDocument = repository.documents.get(cvAId);
+  assert.ok(storedDocument);
+  repository.documents.set(cvAId, {
+    ...storedDocument,
+    fileSize: sourceBuffer.length,
+  });
+  repository.objects.set(storedDocument.storageKey, sourceBuffer);
+  const service = new CvService(repository, {
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxPerApplicant: 5,
+  });
+
+  const source = await service.getFileForAnalysis(applicantAId, cvAId);
+
+  assert.equal(source.applicantId, applicantProfileAId);
+  assert.equal(source.metadata.id, cvAId);
+  assert.deepEqual(source.buffer, sourceBuffer);
+  await assert.rejects(
+    service.getFileForAnalysis(applicantAId, cvBId),
+    (error: unknown) => error instanceof HttpError && error.status === 404,
   );
 });

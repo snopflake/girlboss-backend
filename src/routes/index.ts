@@ -16,6 +16,8 @@ import { createSavedJobsRouter } from "./saved-jobs.routes.js";
 import type { SavedJobsServiceContract } from "../services/saved-jobs.service.js";
 import { createEventsRouter } from "./events.routes.js";
 import type { EventsServiceContract } from "../services/events.service.js";
+import { createCvAnalysesRouter } from "./cv-analyses.routes.js";
+import type { CvAnalysesServiceContract } from "../services/cv-analyses.service.js";
 
 export function createApiRouter(
   environment: Environment["NODE_ENV"],
@@ -27,6 +29,7 @@ export function createApiRouter(
   applicationsService: ApplicationsServiceContract,
   savedJobsService: SavedJobsServiceContract,
   eventsService: EventsServiceContract,
+  cvAnalysesService: CvAnalysesServiceContract,
 ) {
   const apiRouter = Router();
 
@@ -53,6 +56,7 @@ export function createApiRouter(
     createSavedJobsRouter(authService, savedJobsService),
   );
   apiRouter.use("/", createEventsRouter(eventsService));
+  apiRouter.use("/", createCvAnalysesRouter(authService, cvAnalysesService));
 
   if (environment === "development") {
     apiRouter.use("/", createRoleTestRouter(authService));

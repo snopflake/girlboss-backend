@@ -31,12 +31,21 @@ import type { SavedJobsServiceContract } from "./services/saved-jobs.service.js"
 import { SupabaseEventsRepository } from "./repositories/events.repository.js";
 import { EventsService } from "./services/events.service.js";
 import type { EventsServiceContract } from "./services/events.service.js";
+import { SupabaseCvAnalysesRepository } from "./repositories/cv-analyses.repository.js";
+import { CvAnalysesService } from "./services/cv-analyses.service.js";
+import type { CvAnalysesServiceContract } from "./services/cv-analyses.service.js";
+import { CvTextExtractor } from "./services/cv-text-extractor.js";
+import { GeminiCvAnalyzer } from "./services/gemini-cv-analyzer.js";
 
 type AppConfig = Pick<Environment, "CORS_ORIGIN"> &
   Partial<
     Pick<
       Environment,
-      "NODE_ENV" | "CV_MAX_FILE_SIZE_BYTES" | "CV_MAX_PER_APPLICANT"
+      | "NODE_ENV"
+      | "CV_MAX_FILE_SIZE_BYTES"
+      | "CV_MAX_PER_APPLICANT"
+      | "GEMINI_API_KEY"
+      | "GEMINI_MODEL"
     >
   >;
 
@@ -51,6 +60,7 @@ export function createApp(
   applicationsService?: ApplicationsServiceContract,
   savedJobsService?: SavedJobsServiceContract,
   eventsService?: EventsServiceContract,
+  cvAnalysesService?: CvAnalysesServiceContract,
 ) {
   const app = express();
   const maxFileSizeBytes =
@@ -71,6 +81,14 @@ export function createApp(
     new SavedJobsService(new SupabaseSavedJobsRepository());
   const resolvedEventsService =
     eventsService ?? new EventsService(new SupabaseEventsRepository());
+  const resolvedCvAnalysesService =
+    cvAnalysesService ??
+    new CvAnalysesService(
+      new SupabaseCvAnalysesRepository(),
+      resolvedCvService,
+      new CvTextExtractor(),
+      new GeminiCvAnalyzer(config.GEMINI_API_KEY, config.GEMINI_MODEL),
+    );
 
   app.use(cors({ origin: config.CORS_ORIGIN }));
   app.use(express.json({ limit: "1mb" }));
@@ -86,6 +104,7 @@ export function createApp(
       resolvedApplicationsService,
       resolvedSavedJobsService,
       resolvedEventsService,
+      resolvedCvAnalysesService,
     ),
   );
   app.use(notFoundMiddleware);

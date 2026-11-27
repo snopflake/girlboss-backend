@@ -8,6 +8,8 @@ try {
     NODE_ENV: env.NODE_ENV,
     CV_MAX_FILE_SIZE_BYTES: env.CV_MAX_FILE_SIZE_BYTES,
     CV_MAX_PER_APPLICANT: env.CV_MAX_PER_APPLICANT,
+    GEMINI_API_KEY: env.GEMINI_API_KEY,
+    GEMINI_MODEL: env.GEMINI_MODEL,
   });
   const server = app.listen(env.PORT, () => {
     console.info(`GirlBoss API berjalan pada port ${env.PORT}`);

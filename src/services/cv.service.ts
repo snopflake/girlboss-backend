@@ -7,6 +7,7 @@ import type {
 } from "../repositories/cv.repository.js";
 import type {
   CvDocumentRecord,
+  CvAnalysisFile,
   CvMetadata,
   CvMimeType,
   CvUploadFile,
@@ -33,6 +34,7 @@ export interface CvServiceContract {
   upload(userId: string, file: CvUploadFile): Promise<CvMetadata>;
   get(userId: string, id: string): Promise<CvMetadata>;
   createDownloadUrl(userId: string, id: string): Promise<CvDownload>;
+  getFileForAnalysis(userId: string, id: string): Promise<CvAnalysisFile>;
   delete(userId: string, id: string): Promise<void>;
 }
 
@@ -204,6 +206,26 @@ export class CvService implements CvServiceContract {
       CV_SIGNED_URL_TTL_SECONDS,
     );
     return { signedUrl, expiresIn: CV_SIGNED_URL_TTL_SECONDS };
+  }
+
+  async getFileForAnalysis(
+    userId: string,
+    id: string,
+  ): Promise<CvAnalysisFile> {
+    const document = await this.getOwnedDocument(userId, id);
+    const buffer = await this.repository.downloadObject(document.storageKey);
+    if (
+      buffer.length === 0 ||
+      buffer.length !== document.fileSize ||
+      buffer.length > this.options.maxFileSizeBytes
+    ) {
+      throw new HttpError(503, "File CV tidak cocok dengan metadata tersimpan.");
+    }
+    return {
+      applicantId: document.applicantId,
+      metadata: toMetadata(document),
+      buffer,
+    };
   }
 
   async delete(userId: string, id: string): Promise<void> {

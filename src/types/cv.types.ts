@@ -22,3 +22,9 @@ export interface CvUploadFile {
   mimeType: string;
   buffer: Buffer;
 }
+
+export interface CvAnalysisFile {
+  applicantId: string;
+  metadata: CvMetadata;
+  buffer: Buffer;
+}

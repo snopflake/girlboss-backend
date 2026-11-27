@@ -16,7 +16,7 @@ Skrip yang tersedia:
 - `npm run lint` menjalankan ESLint.
 - `npm run typecheck` memeriksa tipe TypeScript, termasuk test.
 - `npm run check:supabase` memeriksa konektivitas Supabase dan membaca roles secara read-only. Memerlukan seluruh variabel Supabase pada `.env`; skrip ini bukan endpoint API.
-- `npm test` menjalankan integration test health, authentication, Jobs, Profile, CV, Job Applications, Saved Jobs, dan Events API dengan test runner bawaan Node.js.
+- `npm test` menjalankan integration test health, authentication, Jobs, Profile, CV, Job Applications, Saved Jobs, Events, dan CV Analyzer API dengan test runner bawaan Node.js.
 
 ## Authentication
 
@@ -116,6 +116,9 @@ Semua endpoint berada di bawah prefix `/api`. Kecuali upload CV, body request me
 | DELETE | `/api/applicant/saved-jobs/:jobId` | APPLICANT, pemilik simpanan | UUID `jobId` | `{ "jobId": "..." }` |
 | GET | `/api/events` | Publik | Query: `page`, `pageSize`, `category`, `eventType`, `search` | `events[]`, `pagination` |
 | GET | `/api/events/:id` | Publik | UUID `id` | Objek event berstatus `PUBLISHED` |
+| POST | `/api/cv-analyses` | APPLICANT | JSON: `{ "cvId": "<uuid>" }` | Analisis dengan `score`, `summary`, `strengths`, `weaknesses`, `recommendations` (HTTP 201) |
+| GET | `/api/cv-analyses` | APPLICANT | Query: `page`, `pageSize` | `analyses[]`, `pagination` |
+| GET | `/api/cv-analyses/:id` | APPLICANT, pemilik analisis | UUID `id` | Detail analisis; hasil `null` jika `PROCESSING`/`FAILED` |
 | POST | `/api/applications` | APPLICANT | JSON: `jobId`, `cvId`, opsional `coverLetter` | `id`, `jobId`, `cvId`, `status`, `submittedAt` (HTTP 201) |
 | GET | `/api/applications` | APPLICANT | Query: `page`, `pageSize`, `status` | `applications[]`, `pagination` |
 | GET | `/api/applications/:id` | APPLICANT, pemilik lamaran | UUID `id` | Detail lamaran dan lowongan |
@@ -135,6 +138,10 @@ CV disimpan pada bucket privat `applicant-documents` di prefix `{applicant_profi
 Job Applications memakai profil applicant/perusahaan yang di-resolve dari JWT. Pengiriman lamaran menggunakan RPC `submit_job_application` agar pemeriksaan lowongan ACTIVE/deadline, kepemilikan CV, insert lamaran, dan tautan CV berlangsung atomik; database juga membatasi satu lamaran per applicant dan lowongan. Daftar memakai pagination. Respons company hanya menyertakan nama dan headline applicant serta metadata CV yang diperlukan; `storage_key` tidak pernah dikembalikan. Transisi status: `TERKIRIM -> DITINJAU/DITOLAK`, `DITINJAU -> WAWANCARA/DITERIMA/DITOLAK`, dan `WAWANCARA -> DITERIMA/DITOLAK`; `DITERIMA` serta `DITOLAK` terminal. Update status menggunakan conditional update sehingga perubahan bersamaan yang memakai status lama ditolak sebagai konflik.
 
 Saved Jobs memakai identitas APPLICANT dari JWT dan menyimpan relasi pada `public.saved_jobs`. Unique constraint `(applicant_id, job_id)` mencegah duplikasi; hanya lowongan berstatus `ACTIVE` yang bisa ditambahkan. Daftar tetap menampilkan status lowongan terbaru, termasuk `CLOSED`, dan dipaginasi.
+
+CV Analyzer memakai CV privat milik pemohon dari CV Management. `POST /api/cv-analyses` membuat analisis sinkron; PDF teks dan DOCX diproses tanpa menjalankan kode/macro. PDF scan tanpa selectable text ditolak (OCR belum tersedia); ekstraksi dibatasi 50 halaman dan 25.000 karakter. Maksimum tiga permintaan per applicant dalam rolling 24 jam. Gemini timeout setelah 30 detik; kegagalan AI disimpan sebagai `FAILED` dan tidak menghasilkan hasil fallback.
+
+Tabel `cv_analyses` menyimpan owner, CV, status, waktu, ringkasan, dan recommendations. Karena tabel belum memiliki kolom score/strengths/weaknesses, nilai tersebut disimpan sebagai JSON terstruktur di kolom teks `summary`, sedangkan `recommendations` tetap memakai array database. Tidak ada migration baru. Hasil dibaca melalui API sebagai field terstruktur.
 
 Jobs hanya memakai kolom yang terdokumentasi pada [docs/database-schema.md](./docs/database-schema.md). Transisi status yang diizinkan adalah `DRAFT -> ACTIVE`, `DRAFT -> CLOSED`, dan `ACTIVE -> CLOSED`; `CLOSED` terminal. Publikasi memerlukan `verification_status = VERIFIED` serta deadline yang tidak lewat. Lowongan dengan deadline sebelum tanggal UTC saat ini tidak ditampilkan publik.
 
@@ -161,7 +168,8 @@ Salin `.env.example` ke `.env`, lalu isi:
 - `SUPABASE_PROJECT_ID`, `SUPABASE_URL`, dan `SUPABASE_PUBLISHABLE_KEY` untuk koneksi project Supabase. Variabel Supabase opsional untuk health check.
 - `SUPABASE_SECRET_KEY` hanya server-side dan digunakan Admin Client untuk operasi Jobs serta pemeriksaan read-only oleh `npm run check:supabase`.
 - `CV_MAX_FILE_SIZE_BYTES` dan `CV_MAX_PER_APPLICANT` untuk mengatur batas upload CV (default masing-masing 10 MiB dan 5 file).
+- `GEMINI_API_KEY` untuk key Gemini, dan `GEMINI_MODEL` untuk nama model Flash yang tersedia pada key tersebut (tanpa prefix `models/`). Keduanya opsional saat startup, tetapi wajib dikonfigurasi untuk menjalankan analisis CV.
 
 Publishable key harus berprefix `sb_publishable_` dan secret key harus berprefix `sb_secret_`. Jika Supabase belum dikonfigurasi lalu kode meminta client database, konfigurasi akan menghasilkan error yang jelas. Tidak ada koneksi atau data palsu. Admin Client hanya digunakan oleh trusted backend code dan tidak diekspos melalui API.
 
-Jangan commit `.env` atau credential. Endpoint COMPANY memverifikasi JWT dan role melalui middleware yang sudah tersedia.
+Jangan commit `.env` atau credential. Endpoint COMPANY memverifikasi JWT dan role melalui middleware yang sudah tersedia. Jangan kirim atau log isi CV maupun API key Gemini.

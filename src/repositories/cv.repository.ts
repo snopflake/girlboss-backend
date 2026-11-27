@@ -37,6 +37,7 @@ export interface CvRepositoryContract {
     file: Buffer,
     mimeType: CvMimeType,
   ): Promise<void>;
+  downloadObject(storageKey: string): Promise<Buffer>;
   removeObject(storageKey: string): Promise<void>;
   createSignedDownloadUrl(
     storageKey: string,
@@ -296,6 +297,23 @@ export class SupabaseCvRepository implements CvRepositoryContract {
         throw error;
       }
       throw new HttpError(503, "File CV tidak dapat diunggah.");
+    }
+  }
+
+  async downloadObject(storageKey: string): Promise<Buffer> {
+    try {
+      const { data, error } = await getSupabaseAdminClient()
+        .storage.from(cvStorageBucket)
+        .download(storageKey);
+      if (error || !data) {
+        throw new HttpError(503, "File CV tidak dapat diambil untuk analisis.");
+      }
+      return Buffer.from(await data.arrayBuffer());
+    } catch (error) {
+      if (error instanceof HttpError) {
+        throw error;
+      }
+      throw new HttpError(503, "File CV tidak dapat diambil untuk analisis.");
     }
   }
 
