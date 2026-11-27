@@ -10,6 +10,8 @@ try {
     CV_MAX_PER_APPLICANT: env.CV_MAX_PER_APPLICANT,
     GEMINI_API_KEY: env.GEMINI_API_KEY,
     GEMINI_MODEL: env.GEMINI_MODEL,
+    GROQ_API_KEY: env.GROQ_API_KEY,
+    GROQ_WHISPER_MODEL: env.GROQ_WHISPER_MODEL,
   });
   const server = app.listen(env.PORT, () => {
     console.info(`GirlBoss API berjalan pada port ${env.PORT}`);

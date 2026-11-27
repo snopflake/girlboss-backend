@@ -3,6 +3,7 @@ import type { InterviewSessionsServiceContract } from "../services/interview-ses
 import { HttpError } from "../utils/httpError.js";
 import {
   createInterviewSessionSchema,
+  interviewAudioAnswerInputSchema,
   interviewAnswerInputSchema,
   interviewSessionIdSchema,
   interviewSessionListQuerySchema,
@@ -187,5 +188,67 @@ export function createInterviewSessionsController(
     }
   };
 
-  return { create, list, get, submitAnswer, complete };
+  const submitAudioAnswer: RequestHandler = async (request, response, next) => {
+    const user = request.authContext?.user;
+    if (!user) {
+      next(new HttpError(401, "Autentikasi diperlukan."));
+      return;
+    }
+
+    const parsedId = interviewSessionIdSchema.safeParse(request.params.id);
+    if (!parsedId.success) {
+      response.status(400).json({
+        success: false,
+        message: "ID sesi wawancara tidak valid.",
+        errors: validationIssues(parsedId.error),
+      });
+      return;
+    }
+    const parsed = interviewAudioAnswerInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({
+        success: false,
+        message: "Data jawaban audio tidak valid.",
+        errors: validationIssues(parsed.error),
+      });
+      return;
+    }
+    if (!request.file) {
+      response.status(400).json({
+        success: false,
+        message: "File audio wajib disertakan pada field audio.",
+        errors: null,
+      });
+      return;
+    }
+
+    try {
+      const answer = await service.submitAudioAnswer(
+        user.id,
+        parsedId.data,
+        parsed.data,
+        {
+          buffer: request.file.buffer,
+          mimeType: request.file.mimetype,
+          originalName: request.file.originalname,
+        },
+      );
+      response.status(200).json({
+        success: true,
+        message: "Rekaman berhasil ditranskripsikan dan dievaluasi.",
+        data: { answer },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  return {
+    create,
+    list,
+    get,
+    submitAnswer,
+    submitAudioAnswer,
+    complete,
+  };
 }

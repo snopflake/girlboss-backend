@@ -41,6 +41,7 @@ import { InterviewSessionsService } from "./services/interview-sessions.service.
 import type { InterviewSessionsServiceContract } from "./services/interview-sessions.service.js";
 import { GeminiJsonGenerator } from "./services/gemini-json-generator.js";
 import { GeminiInterviewProvider } from "./services/gemini-interview-provider.js";
+import { GroqWhisperTranscriber } from "./services/interview-audio.js";
 
 type AppConfig = Pick<Environment, "CORS_ORIGIN"> &
   Partial<
@@ -51,6 +52,8 @@ type AppConfig = Pick<Environment, "CORS_ORIGIN"> &
       | "CV_MAX_PER_APPLICANT"
       | "GEMINI_API_KEY"
       | "GEMINI_MODEL"
+      | "GROQ_API_KEY"
+      | "GROQ_WHISPER_MODEL"
     >
   >;
 
@@ -101,6 +104,10 @@ export function createApp(
       new SupabaseInterviewSessionsRepository(),
       new GeminiInterviewProvider(
         new GeminiJsonGenerator(config.GEMINI_API_KEY, config.GEMINI_MODEL),
+      ),
+      new GroqWhisperTranscriber(
+        config.GROQ_API_KEY,
+        config.GROQ_WHISPER_MODEL,
       ),
     );
 

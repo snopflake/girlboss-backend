@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:supabase": "tsx scripts/check-supabase.ts",
-    "test": "node --import tsx --test tests/health.integration.test.ts tests/auth.routes.test.ts tests/jobs.routes.test.ts tests/profile.routes.test.ts tests/cv.routes.test.ts tests/applications.routes.test.ts tests/saved-jobs.routes.test.ts tests/events.routes.test.ts tests/cv-analyses.routes.test.ts tests/cv-text-extractor.test.ts tests/interview-sessions.routes.test.ts"
+    "test": "node --import tsx --test tests/health.integration.test.ts tests/auth.routes.test.ts tests/jobs.routes.test.ts tests/profile.routes.test.ts tests/cv.routes.test.ts tests/applications.routes.test.ts tests/saved-jobs.routes.test.ts tests/events.routes.test.ts tests/cv-analyses.routes.test.ts tests/cv-text-extractor.test.ts tests/interview-sessions.routes.test.ts tests/interview-audio.test.ts"
   },
   "keywords": [],
   "author": "",

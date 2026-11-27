@@ -123,6 +123,7 @@ Semua endpoint berada di bawah prefix `/api`. Kecuali upload CV, body request me
 | GET | `/api/interview-sessions` | APPLICANT | Query: `page`, `pageSize` | `sessions[]`, `pagination` |
 | GET | `/api/interview-sessions/:id` | APPLICANT, pemilik sesi | UUID `id` | Detail pertanyaan, jawaban, evaluasi, dan ringkasan jika selesai |
 | POST | `/api/interview-sessions/:id/answers` | APPLICANT, pemilik sesi | JSON: `{ "questionId": "<uuid>", "answerText": "..." }` | Jawaban dan evaluasi terstruktur |
+| POST | `/api/interview-sessions/:id/audio-answers` | APPLICANT, pemilik sesi | `multipart/form-data`: `questionId` dan satu file `audio` (WebM/WAV/OGG) | Transkripsi, evaluasi, dan indikator penyampaian |
 | POST | `/api/interview-sessions/:id/complete` | APPLICANT, pemilik sesi | UUID `id`; semua lima jawaban harus sudah dievaluasi | Sesi `COMPLETED` dan ringkasan skor |
 | POST | `/api/applications` | APPLICANT | JSON: `jobId`, `cvId`, opsional `coverLetter` | `id`, `jobId`, `cvId`, `status`, `submittedAt` (HTTP 201) |
 | GET | `/api/applications` | APPLICANT | Query: `page`, `pageSize`, `status` | `applications[]`, `pagination` |
@@ -152,6 +153,8 @@ Interview Preparation menyimpan posisi, status sesi, lima pertanyaan, jawaban te
 
 Pemeriksaan duplikasi jawaban dilakukan sebelum dan sesudah pemanggilan Gemini. Spesifikasi REST Supabase tidak mengonfirmasi unique constraint pada `answers.question_id`, sehingga request serentak untuk pertanyaan yang sama masih memerlukan constraint database untuk jaminan atomik. Penghitungan kuota sesi juga bukan operasi atomik antar-request.
 
+Audio Interview menerima file maksimal 20 MiB dan maksimal 180 detik. WAV duration diperiksa dari header sebelum transkripsi; WebM/OGG duration diperiksa dari metadata Whisper sebelum jawaban disimpan. Groq Whisper mendeteksi bahasa otomatis untuk rekaman Indonesia/Inggris; audio hanya ditahan sementara di memory dan tidak disimpan. Transkripsi mengisi `answers.answer_text`; feedback suara disimpan bersama evaluasi sebagai JSON di `evaluations.recommendations`. WPM dihitung dari jumlah kata dan durasi. Gap timestamp segmen Whisper minimal 0,6 detik dilaporkan sebagai perkiraan jeda, bukan deteksi hening akustik. Median F0 (Hz) dan variasi IQR (semiton) dihitung lokal dengan YIN dari frame bersuara valid hanya untuk WAV PCM yang didukung; WebM/OGG tetap ditranskripsikan, tetapi pitch berstatus `UNSUPPORTED_FORMAT` tanpa decoder. Feedback pitch netral dan tidak menilai emosi, kepercayaan diri, atau kepribadian.
+
 Jobs hanya memakai kolom yang terdokumentasi pada [docs/database-schema.md](./docs/database-schema.md). Transisi status yang diizinkan adalah `DRAFT -> ACTIVE`, `DRAFT -> CLOSED`, dan `ACTIVE -> CLOSED`; `CLOSED` terminal. Publikasi memerlukan `verification_status = VERIFIED` serta deadline yang tidak lewat. Lowongan dengan deadline sebelum tanggal UTC saat ini tidak ditampilkan publik.
 
 Jobs API memakai Supabase Admin Client hanya di backend. Karena client administratif melewati RLS, setiap query publik membatasi status/deadline dan setiap query perusahaan membatasi kepemilikan dari user ID pada JWT terverifikasi. Tidak ada migration atau RLS policy baru pada implementasi ini. Jangan memakai secret key di frontend.
@@ -179,6 +182,7 @@ Salin `.env.example` ke `.env`, lalu isi:
 - `CV_MAX_FILE_SIZE_BYTES` dan `CV_MAX_PER_APPLICANT` untuk mengatur batas upload CV (default masing-masing 10 MiB dan 5 file).
 - `GEMINI_API_KEY` untuk key Gemini, dan `GEMINI_MODEL` untuk nama model Flash yang tersedia pada key tersebut (tanpa prefix `models/`). Keduanya opsional saat startup, tetapi wajib dikonfigurasi untuk menjalankan analisis CV.
 - Konfigurasi `GEMINI_API_KEY` dan `GEMINI_MODEL` yang sama juga digunakan AI Interview Preparation; tidak ada environment tambahan.
+- `GROQ_API_KEY` untuk transkripsi audio server-side dan `GROQ_WHISPER_MODEL` (default contoh: `whisper-large-v3-turbo`). Keduanya hanya digunakan oleh endpoint audio wawancara.
 
 Publishable key harus berprefix `sb_publishable_` dan secret key harus berprefix `sb_secret_`. Jika Supabase belum dikonfigurasi lalu kode meminta client database, konfigurasi akan menghasilkan error yang jelas. Tidak ada koneksi atau data palsu. Admin Client hanya digunakan oleh trusted backend code dan tidak diekspos melalui API.
 

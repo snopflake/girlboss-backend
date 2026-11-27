@@ -8,8 +8,11 @@ import type {
 import type {
   InterviewEvaluationResult,
   InterviewSessionListQuery,
+  SpeechDeliveryMetrics,
 } from "../validators/interview-sessions.validator.js";
-import { interviewEvaluationResultSchema } from "../validators/interview-sessions.validator.js";
+import {
+  storedInterviewEvaluationSchema,
+} from "../validators/interview-sessions.validator.js";
 import { HttpError } from "../utils/httpError.js";
 
 export interface InterviewSessionsRepositoryContract {
@@ -34,6 +37,7 @@ export interface InterviewSessionsRepositoryContract {
     questionId: string,
     answerText: string,
     evaluation: InterviewEvaluationResult,
+    speechMetrics?: SpeechDeliveryMetrics,
   ): Promise<InterviewAnswer>;
   markCompleted(id: string, applicantId: string): Promise<boolean>;
 }
@@ -83,15 +87,24 @@ function parseEvaluation(value: unknown): InterviewAnswer["evaluation"] {
     value.recommendations,
     "Data evaluasi wawancara tidak valid.",
   );
-  let result: unknown;
+  let storedJson: unknown;
   try {
-    result = JSON.parse(recommendations);
+    storedJson = JSON.parse(recommendations);
   } catch {
     databaseError("Data evaluasi wawancara tidak valid.");
   }
-  const parsedResult = interviewEvaluationResultSchema.safeParse(result);
-  if (!parsedResult.success) {
+  const parsedStoredResult =
+    storedInterviewEvaluationSchema.safeParse(storedJson);
+  if (!parsedStoredResult.success) {
     databaseError("Data evaluasi wawancara tidak valid.");
+  }
+  let evaluationResult: InterviewEvaluationResult;
+  let speechMetrics: SpeechDeliveryMetrics | undefined;
+  if ("evaluation" in parsedStoredResult.data) {
+    evaluationResult = parsedStoredResult.data.evaluation;
+    speechMetrics = parsedStoredResult.data.speechMetrics;
+  } else {
+    evaluationResult = parsedStoredResult.data;
   }
   return {
     score,
@@ -99,7 +112,8 @@ function parseEvaluation(value: unknown): InterviewAnswer["evaluation"] {
       value.evaluated_at,
       "Data evaluasi wawancara tidak valid.",
     ),
-    result: parsedResult.data,
+    result: evaluationResult,
+    ...(speechMetrics ? { speechMetrics } : {}),
   };
 }
 
@@ -421,6 +435,7 @@ export class SupabaseInterviewSessionsRepository
     questionId: string,
     answerText: string,
     evaluation: InterviewEvaluationResult,
+    speechMetrics?: SpeechDeliveryMetrics,
   ): Promise<InterviewAnswer> {
     const { data: answer, error: answerError } = await executeDatabaseRequest(
       () =>
@@ -456,7 +471,11 @@ export class SupabaseInterviewSessionsRepository
             .insert({
               answer_id: answer.id,
               score: overallScore(evaluation),
-              recommendations: JSON.stringify(evaluation),
+              recommendations: JSON.stringify(
+                speechMetrics
+                  ? { evaluation, speechMetrics }
+                  : evaluation,
+              ),
             })
             .select("id, evaluated_at")
             .single(),
@@ -502,6 +521,7 @@ export class SupabaseInterviewSessionsRepository
         score: overallScore(evaluation),
         evaluatedAt: evaluationData.evaluated_at,
         result: evaluation,
+        ...(speechMetrics ? { speechMetrics } : {}),
       },
     };
   }

@@ -8,10 +8,22 @@ import type {
 } from "../types/interview-sessions.types.js";
 import type {
   CreateInterviewSessionInput,
+  InterviewAudioAnswerInput,
   InterviewAnswerInput,
   InterviewSessionListQuery,
+  SpeechDeliveryMetrics,
 } from "../validators/interview-sessions.validator.js";
 import type { InterviewAiProviderContract } from "./gemini-interview-provider.js";
+import {
+  buildSpeechDeliveryMetrics,
+  inspectInterviewAudio,
+  MAX_INTERVIEW_AUDIO_DURATION_SECONDS,
+} from "./interview-audio.js";
+import type {
+  InterviewAudioFile,
+  InterviewAudioTranscriberContract,
+} from "./interview-audio.js";
+import { analyzeWavPitch } from "./wav-pitch-analyzer.js";
 import { HttpError } from "../utils/httpError.js";
 
 export const MAX_INTERVIEW_SESSIONS_PER_24_HOURS = 2;
@@ -32,6 +44,12 @@ export interface InterviewSessionsServiceContract {
     id: string,
     input: InterviewAnswerInput,
   ): Promise<InterviewAnswer>;
+  submitAudioAnswer(
+    userId: string,
+    id: string,
+    input: InterviewAudioAnswerInput,
+    file: InterviewAudioFile,
+  ): Promise<InterviewAnswer>;
   complete(userId: string, id: string): Promise<InterviewSession>;
 }
 
@@ -41,6 +59,7 @@ export class InterviewSessionsService
   constructor(
     private readonly repository: InterviewSessionsRepositoryContract,
     private readonly aiProvider: InterviewAiProviderContract,
+    private readonly audioTranscriber?: InterviewAudioTranscriberContract,
   ) {}
 
   async create(
@@ -95,6 +114,81 @@ export class InterviewSessionsService
     id: string,
     input: InterviewAnswerInput,
   ): Promise<InterviewAnswer> {
+    const submission = await this.prepareAnswerSubmission(
+      userId,
+      id,
+      input.questionId,
+    );
+    return this.evaluateAndSaveAnswer(
+      submission,
+      input.answerText,
+    );
+  }
+
+  async submitAudioAnswer(
+    userId: string,
+    id: string,
+    input: InterviewAudioAnswerInput,
+    file: InterviewAudioFile,
+  ): Promise<InterviewAnswer> {
+    const submission = await this.prepareAnswerSubmission(
+      userId,
+      id,
+      input.questionId,
+    );
+    if (!this.audioTranscriber?.isConfigured()) {
+      throw new HttpError(503, "Transkripsi Groq belum dikonfigurasi di backend.");
+    }
+
+    const inspection = inspectInterviewAudio(file);
+    const transcription = await this.audioTranscriber.transcribe(file);
+    const duration = transcription.durationSeconds;
+    if (duration === null || !Number.isFinite(duration) || duration <= 0) {
+      throw new HttpError(
+        422,
+        "Durasi audio tidak dapat diverifikasi dari hasil transkripsi.",
+      );
+    }
+    if (duration > MAX_INTERVIEW_AUDIO_DURATION_SECONDS) {
+      throw new HttpError(413, "Durasi rekaman melebihi batas 180 detik.");
+    }
+    if (
+      inspection.preflightDurationSeconds !== null &&
+      Math.abs(inspection.preflightDurationSeconds - duration) > 2
+    ) {
+      throw new HttpError(422, "Durasi audio tidak konsisten.");
+    }
+    if (!transcription.text.trim() || transcription.text.length > 8_000) {
+      throw new HttpError(
+        422,
+        "Transkripsi kosong atau terlalu panjang untuk dievaluasi.",
+      );
+    }
+
+    const pitchAnalysis =
+      inspection.mimeType === "audio/wav"
+        ? analyzeWavPitch(file.buffer)
+        : undefined;
+    const speechMetrics = buildSpeechDeliveryMetrics(
+      transcription,
+      pitchAnalysis,
+    );
+    return this.evaluateAndSaveAnswer(
+      submission,
+      transcription.text,
+      speechMetrics,
+    );
+  }
+
+  private async prepareAnswerSubmission(
+    userId: string,
+    id: string,
+    questionId: string,
+  ): Promise<{
+    applicantId: string;
+    session: InterviewSession;
+    question: { id: string; questionText: string };
+  }> {
     const applicantId = await this.getApplicantProfileId(userId);
     const session = await this.repository.findById(id, applicantId);
     if (!session) {
@@ -104,32 +198,47 @@ export class InterviewSessionsService
       throw new HttpError(409, "Sesi wawancara sudah selesai.");
     }
 
-    const question = await this.repository.findQuestion(id, input.questionId);
+    const question = await this.repository.findQuestion(id, questionId);
     if (!question) {
       throw new HttpError(404, "Pertanyaan tidak ditemukan pada sesi ini.");
     }
     if (await this.repository.hasAnswer(question.id)) {
       throw new HttpError(409, "Pertanyaan ini sudah dijawab.");
     }
+    return { applicantId, session, question };
+  }
 
+  private async evaluateAndSaveAnswer(
+    submission: {
+      applicantId: string;
+      session: InterviewSession;
+      question: { id: string; questionText: string };
+    },
+    answerText: string,
+    speechMetrics?: SpeechDeliveryMetrics,
+  ): Promise<InterviewAnswer> {
     const evaluation = await this.aiProvider.evaluateAnswer(
-      session.jobTitle,
-      question.questionText,
-      input.answerText,
+      submission.session.jobTitle,
+      submission.question.questionText,
+      answerText,
     );
 
-    const latestSession = await this.repository.findById(id, applicantId);
+    const latestSession = await this.repository.findById(
+      submission.session.id,
+      submission.applicantId,
+    );
     if (!latestSession || latestSession.status !== "IN_PROGRESS") {
       throw new HttpError(409, "Sesi wawancara sudah selesai.");
     }
-    if (await this.repository.hasAnswer(question.id)) {
+    if (await this.repository.hasAnswer(submission.question.id)) {
       throw new HttpError(409, "Pertanyaan ini sudah dijawab.");
     }
 
     return this.repository.createAnswerWithEvaluation(
-      question.id,
-      input.answerText,
+      submission.question.id,
+      answerText,
       evaluation,
+      speechMetrics,
     );
   }
 

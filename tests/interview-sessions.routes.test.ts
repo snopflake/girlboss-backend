@@ -22,8 +22,19 @@ import { InterviewSessionsService } from "../src/services/interview-sessions.ser
 import { GeminiJsonGenerator } from "../src/services/gemini-json-generator.js";
 import { GeminiInterviewProvider } from "../src/services/gemini-interview-provider.js";
 import type {
+  InterviewAudioFile,
+  InterviewAudioTranscriberContract,
+  InterviewTranscription,
+} from "../src/services/interview-audio.js";
+import {
+  GroqWhisperTranscriber,
+  inspectInterviewAudio,
+  MAX_INTERVIEW_AUDIO_BYTES,
+} from "../src/services/interview-audio.js";
+import type {
   InterviewEvaluationResult,
   InterviewQuestionsResult,
+  SpeechDeliveryMetrics,
 } from "../src/validators/interview-sessions.validator.js";
 import { HttpError } from "../src/utils/httpError.js";
 
@@ -229,6 +240,7 @@ function createMemoryRepository(): InterviewSessionsRepositoryContract & {
       questionId,
       answerText,
       evaluation,
+      speechMetrics,
     ) {
       const question = sessions
         .flatMap((session) => session.questions)
@@ -251,6 +263,7 @@ function createMemoryRepository(): InterviewSessionsRepositoryContract & {
           ),
           evaluatedAt: new Date().toISOString(),
           result: evaluation,
+          ...(speechMetrics ? { speechMetrics } : {}),
         },
       };
       question.answer = answer;
@@ -274,10 +287,11 @@ function createMemoryRepository(): InterviewSessionsRepositoryContract & {
 
 function createHarness(options?: {
   aiProvider?: InterviewAiProviderContract;
+  audioTranscriber?: InterviewAudioTranscriberContract;
   configured?: boolean;
 }) {
   const repository = createMemoryRepository();
-  const calls = { generateQuestions: 0, evaluateAnswer: 0 };
+  const calls = { generateQuestions: 0, evaluateAnswer: 0, transcribe: 0 };
   const aiProvider: InterviewAiProviderContract =
     options?.aiProvider ?? {
       isConfigured: () => options?.configured ?? true,
@@ -290,7 +304,26 @@ function createHarness(options?: {
         return evaluationResult;
       },
     };
-  const service = new InterviewSessionsService(repository, aiProvider);
+  const audioTranscriber: InterviewAudioTranscriberContract =
+    options?.audioTranscriber ?? {
+      isConfigured: () => true,
+      async transcribe(_file: InterviewAudioFile): Promise<InterviewTranscription> {
+        calls.transcribe += 1;
+        return {
+          text: "I clarified the goal and delivered a measurable result.",
+          durationSeconds: 8,
+          segments: [
+            { start: 0, end: 2, text: "I clarified the goal" },
+            { start: 3, end: 7, text: "and delivered a measurable result" },
+          ],
+        };
+      },
+    };
+  const service = new InterviewSessionsService(
+    repository,
+    aiProvider,
+    audioTranscriber,
+  );
   const authService = {
     register: async (_input: RegisterInput) => {},
     login: async (_input: LoginInput) => {
@@ -349,6 +382,19 @@ function auth(token: string): Record<string, string> {
   return { authorization: `Bearer ${token}` };
 }
 
+function audioFormData(questionId: string): FormData {
+  const formData = new FormData();
+  formData.append("questionId", questionId);
+  formData.append(
+    "audio",
+    new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x00])], {
+      type: "audio/webm",
+    }),
+    "answer.webm",
+  );
+  return formData;
+}
+
 async function postJson(
   url: string,
   token: string,
@@ -358,6 +404,18 @@ async function postJson(
     method: "POST",
     headers: { ...auth(token), "content-type": "application/json" },
     body: JSON.stringify(body),
+  });
+}
+
+async function postAudio(
+  url: string,
+  token: string,
+  questionId: string,
+): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    headers: auth(token),
+    body: audioFormData(questionId),
   });
 }
 
@@ -503,6 +561,12 @@ test("interview routes require authentication and APPLICANT role", async () => {
       { jobTitle: "Backend Engineer" },
     );
     assert.equal(company.status, 403);
+    const companyAudio = await postAudio(
+      `${baseUrl}/api/interview-sessions/30000000-0000-4000-8000-000000000001/audio-answers`,
+      "company-token",
+      "40000000-0000-4000-8000-000000000001",
+    );
+    assert.equal(companyAudio.status, 403);
     assert.equal(harness.repository.sessions.length, 0);
   });
 });
@@ -608,6 +672,205 @@ test("daily session quota and evaluation failures are enforced", async () => {
     };
     assert.equal(detail.data.questions[0]?.answer, null);
   });
+});
+
+test("audio answers are transcribed, evaluated, and stored without retaining raw audio", async () => {
+  const harness = createHarness();
+  await withServer(harness, async (baseUrl) => {
+    const createResponse = await postJson(
+      `${baseUrl}/api/interview-sessions`,
+      "applicant-a-token",
+      { jobTitle: "Backend Engineer" },
+    );
+    const created = (await createResponse.json()) as {
+      data: InterviewSession;
+    };
+    const question = created.data.questions[0]!;
+    const response = await postAudio(
+      `${baseUrl}/api/interview-sessions/${created.data.id}/audio-answers`,
+      "applicant-a-token",
+      question.id,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      data: { answer: InterviewAnswer };
+    };
+    assert.equal(
+      body.data.answer.answerText,
+      "I clarified the goal and delivered a measurable result.",
+    );
+    const metrics = body.data.answer.evaluation?.speechMetrics;
+    assert.ok(metrics);
+    const typedMetrics: SpeechDeliveryMetrics = metrics;
+    assert.equal(typedMetrics.durationSeconds, 8);
+    assert.equal(typedMetrics.wordsPerMinute, 67.5);
+    assert.equal(typedMetrics.pauseCount, 1);
+    assert.equal(typedMetrics.pitchVariation, null);
+    assert.equal(typedMetrics.pitchStatus, "UNSUPPORTED_FORMAT");
+    assert.equal(harness.calls.transcribe, 1);
+
+    const detailResponse = await fetch(
+      `${baseUrl}/api/interview-sessions/${created.data.id}`,
+      { headers: auth("applicant-a-token") },
+    );
+    const detail = (await detailResponse.json()) as {
+      data: InterviewSession;
+    };
+    assert.equal(
+      detail.data.questions[0]?.answer?.evaluation?.speechMetrics?.durationSeconds,
+      8,
+    );
+    assert.equal(
+      JSON.stringify(harness.repository.sessions).includes("answer.webm"),
+      false,
+    );
+  });
+});
+
+test("audio validation, duration limits, ownership, and duplicate protection run before provider calls", async () => {
+  const harness = createHarness();
+  await withServer(harness, async (baseUrl) => {
+    const createResponse = await postJson(
+      `${baseUrl}/api/interview-sessions`,
+      "applicant-a-token",
+      { jobTitle: "Backend Engineer" },
+    );
+    const created = (await createResponse.json()) as {
+      data: InterviewSession;
+    };
+    const question = created.data.questions[0]!;
+    const textAnswer = await postJson(
+      `${baseUrl}/api/interview-sessions/${created.data.id}/answers`,
+      "applicant-a-token",
+      {
+        questionId: question.id,
+        answerText: "I explained the approach and its measurable outcome.",
+      },
+    );
+    assert.equal(textAnswer.status, 200);
+
+    const duplicateAudio = await postAudio(
+      `${baseUrl}/api/interview-sessions/${created.data.id}/audio-answers`,
+      "applicant-a-token",
+      question.id,
+    );
+    assert.equal(duplicateAudio.status, 409);
+    assert.equal(harness.calls.transcribe, 0);
+
+    const foreignSessionAudio = await postAudio(
+      `${baseUrl}/api/interview-sessions/${created.data.id}/audio-answers`,
+      "applicant-b-token",
+      created.data.questions[1]!.id,
+    );
+    assert.equal(foreignSessionAudio.status, 404);
+    assert.equal(harness.calls.transcribe, 0);
+  });
+
+  const longAudioTranscriber: InterviewAudioTranscriberContract = {
+    isConfigured: () => true,
+    async transcribe() {
+      return {
+        text: "A sufficiently long answer about my work and its outcome.",
+        durationSeconds: 181,
+        segments: null,
+      };
+    },
+  };
+  const longAudioHarness = createHarness({
+    audioTranscriber: longAudioTranscriber,
+  });
+  await withServer(longAudioHarness, async (baseUrl) => {
+    const createResponse = await postJson(
+      `${baseUrl}/api/interview-sessions`,
+      "applicant-a-token",
+      { jobTitle: "Backend Engineer" },
+    );
+    const created = (await createResponse.json()) as {
+      data: InterviewSession;
+    };
+    const response = await postAudio(
+      `${baseUrl}/api/interview-sessions/${created.data.id}/audio-answers`,
+      "applicant-a-token",
+      created.data.questions[0]!.id,
+    );
+    assert.equal(response.status, 413);
+    const detail = await longAudioHarness.service.get(
+      applicantAId,
+      created.data.id,
+    );
+    assert.equal(detail.questions[0]?.answer, null);
+  });
+});
+
+test("Groq Whisper uses the configured model and handles throttling without exposing provider details", async () => {
+  const observedForms: FormData[] = [];
+  let observedAuthorization: string | null = null;
+  const transcriber = new GroqWhisperTranscriber(
+    "mock-groq-key",
+    "whisper-large-v3-turbo",
+    async (_input, init) => {
+      observedForms.push(init?.body as FormData);
+      observedAuthorization = new Headers(init?.headers).get("authorization");
+      return new Response(
+        JSON.stringify({
+          text: "A clear answer with a relevant example.",
+          duration: 7.5,
+          segments: [
+            { start: 0, end: 2, text: "A clear answer" },
+            { start: 3, end: 7, text: "with a relevant example" },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  );
+  const file: InterviewAudioFile = {
+    buffer: Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00]),
+    mimeType: "audio/webm",
+    originalName: "answer.webm",
+  };
+  const transcription = await transcriber.transcribe(file);
+  assert.equal(transcription.durationSeconds, 7.5);
+  assert.equal(observedAuthorization, "Bearer mock-groq-key");
+  const observedForm = observedForms[0];
+  assert.ok(observedForm);
+  assert.equal(observedForm.get("model"), "whisper-large-v3-turbo");
+  assert.equal(observedForm.get("response_format"), "verbose_json");
+  assert.equal(observedForm.get("timestamp_granularities[]"), "segment");
+
+  const throttled = new GroqWhisperTranscriber(
+    "mock-groq-key",
+    "whisper-large-v3-turbo",
+    async () => new Response("private provider details", { status: 429 }),
+  );
+  await assert.rejects(
+    throttled.transcribe(file),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.status === 429 &&
+      !error.message.includes("private provider details"),
+  );
+});
+
+test("audio MIME/signature checks reject mismatched data and enforce upload size", () => {
+  assert.throws(
+    () =>
+      inspectInterviewAudio({
+        buffer: Buffer.from("not audio"),
+        mimeType: "audio/webm",
+        originalName: "answer.webm",
+      }),
+    (error: unknown) => error instanceof HttpError && error.status === 400,
+  );
+  assert.throws(
+    () =>
+      inspectInterviewAudio({
+        buffer: Buffer.alloc(MAX_INTERVIEW_AUDIO_BYTES + 1),
+        mimeType: "audio/webm",
+        originalName: "answer.webm",
+      }),
+    (error: unknown) => error instanceof HttpError && error.status === 413,
+  );
 });
 
 test("Gemini interview provider validates structured questions and feedback with a mock", async () => {

@@ -1,5 +1,6 @@
 import type {
   InterviewEvaluationResult,
+  SpeechDeliveryMetrics,
 } from "../validators/interview-sessions.validator.js";
 
 export type InterviewSessionStatus = string;
@@ -8,6 +9,7 @@ export interface InterviewEvaluation {
   score: number;
   evaluatedAt: string;
   result: InterviewEvaluationResult;
+  speechMetrics?: SpeechDeliveryMetrics;
 }
 
 export interface InterviewAnswer {

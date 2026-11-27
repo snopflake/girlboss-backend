@@ -16,6 +16,8 @@ const envSchema = z.object({
   SUPABASE_SECRET_KEY: optionalValue(z.string().startsWith("sb_secret_")),
   GEMINI_API_KEY: optionalValue(z.string().min(1)),
   GEMINI_MODEL: optionalValue(z.string().regex(/^[A-Za-z0-9._-]+$/)),
+  GROQ_API_KEY: optionalValue(z.string().min(1)),
+  GROQ_WHISPER_MODEL: optionalValue(z.string().regex(/^[A-Za-z0-9._-]+$/)),
 });
 
 export type Environment = z.infer<typeof envSchema>;

@@ -15,6 +15,12 @@ export const interviewAnswerInputSchema = z
   })
   .strict();
 
+export const interviewAudioAnswerInputSchema = z
+  .object({
+    questionId: z.uuid(),
+  })
+  .strict();
+
 export const interviewSessionListQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).max(1_000_000).default(1),
@@ -56,10 +62,59 @@ export const interviewEvaluationResultSchema = z
   })
   .strict();
 
+export const speechDeliveryMetricsSchema = z
+  .object({
+    durationSeconds: z.number().positive().nullable(),
+    durationStatus: z.enum(["MEASURED", "UNAVAILABLE"]),
+    wordCount: z.number().int().nonnegative().nullable(),
+    wordsPerMinute: z.number().nonnegative().nullable(),
+    speechRateStatus: z.enum([
+      "MEASURED",
+      "INSUFFICIENT_TRANSCRIPT",
+      "UNAVAILABLE",
+    ]),
+    pauseCount: z.number().int().nonnegative().nullable(),
+    totalPauseSeconds: z.number().nonnegative().nullable(),
+    pauseStatus: z.enum([
+      "ESTIMATED_FROM_SEGMENTS",
+      "MEASURED",
+      "INSUFFICIENT_SEGMENTS",
+      "UNAVAILABLE",
+    ]),
+    pauseSource: z.literal("WHISPER_SEGMENT_TIMESTAMPS").optional(),
+    pauseThresholdSeconds: z.number().positive().optional(),
+    pitchMedianHz: z.number().positive().nullable().optional(),
+    pitchVariation: z.number().nonnegative().nullable(),
+    pitchVariationUnit: z.literal("semitones").optional(),
+    voicedFrameCount: z.number().int().nonnegative().nullable().optional(),
+    pitchStatus: z.enum([
+      "MEASURED",
+      "INSUFFICIENT_VOICED_FRAMES",
+      "UNSUPPORTED_FORMAT",
+      "NOT_ANALYZED",
+    ]),
+    pitchFeedback: z.string().trim().min(1).max(500).optional(),
+    deliveryFeedback: z.string().trim().min(1).max(1_000),
+  })
+  .strict();
+
+export const storedInterviewEvaluationSchema = z.union([
+  interviewEvaluationResultSchema,
+  z
+    .object({
+      evaluation: interviewEvaluationResultSchema,
+      speechMetrics: speechDeliveryMetricsSchema,
+    })
+    .strict(),
+]);
+
 export type CreateInterviewSessionInput = z.infer<
   typeof createInterviewSessionSchema
 >;
 export type InterviewAnswerInput = z.infer<typeof interviewAnswerInputSchema>;
+export type InterviewAudioAnswerInput = z.infer<
+  typeof interviewAudioAnswerInputSchema
+>;
 export type InterviewSessionListQuery = z.infer<
   typeof interviewSessionListQuerySchema
 >;
@@ -68,4 +123,7 @@ export type InterviewQuestionsResult = z.infer<
 >;
 export type InterviewEvaluationResult = z.infer<
   typeof interviewEvaluationResultSchema
+>;
+export type SpeechDeliveryMetrics = z.infer<
+  typeof speechDeliveryMetricsSchema
 >;
