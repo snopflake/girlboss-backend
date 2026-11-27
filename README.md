@@ -97,6 +97,12 @@ Authentication dan Jobs API menggunakan struktur routes → middleware → contr
 | GET | `/api/company/jobs` | COMPANY terautentikasi melihat lowongan sendiri; query: `page`, `pageSize` |
 | PATCH | `/api/company/jobs/:id` | COMPANY pemilik memperbarui `title`, `employmentType`, `location`, atau `deadline` |
 | PATCH | `/api/company/jobs/:id/status` | COMPANY pemilik mengubah status dengan aturan transisi |
+| GET | `/api/applicant/profile` | APPLICANT terautentikasi membaca profilnya |
+| PATCH | `/api/applicant/profile` | APPLICANT memperbarui `headline`, `phoneNumber`, dan/atau `professionalSummary` |
+| GET | `/api/company/profile` | COMPANY terautentikasi membaca profilnya |
+| PATCH | `/api/company/profile` | COMPANY memperbarui `companyName` dan/atau `industry` |
+
+Profile endpoints memakai identitas pengguna dari JWT terverifikasi. Respons memuat `fullName` dari identitas akun, tetapi endpoint PATCH tidak mengubah `users.full_name`. Field PATCH divalidasi secara ketat; field kepemilikan, role, status akun, dan status verifikasi tidak dapat diubah. PATCH menggunakan Admin Client dengan filter `user_id` pemilik dari JWT karena grant/RLS database untuk `authenticated` hanya mengizinkan SELECT.
 
 Jobs hanya memakai kolom yang terdokumentasi pada [docs/database-schema.md](./docs/database-schema.md). Transisi status yang diizinkan adalah `DRAFT -> ACTIVE`, `DRAFT -> CLOSED`, dan `ACTIVE -> CLOSED`; `CLOSED` terminal. Publikasi memerlukan `verification_status = VERIFIED` serta deadline yang tidak lewat. Lowongan dengan deadline sebelum tanggal UTC saat ini tidak ditampilkan publik.
 

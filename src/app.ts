@@ -10,6 +10,9 @@ import type { AuthServiceContract } from "./services/auth.service.js";
 import { SupabaseJobsRepository } from "./repositories/jobs.repository.js";
 import { JobsService } from "./services/jobs.service.js";
 import type { JobsServiceContract } from "./services/jobs.service.js";
+import { SupabaseProfileRepository } from "./repositories/profile.repository.js";
+import { ProfileService } from "./services/profile.service.js";
+import type { ProfileServiceContract } from "./services/profile.service.js";
 
 type AppConfig = Pick<Environment, "CORS_ORIGIN"> &
   Partial<Pick<Environment, "NODE_ENV">>;
@@ -18,6 +21,9 @@ export function createApp(
   config: AppConfig,
   authService: AuthServiceContract = new AuthService(new SupabaseAuthRepository()),
   jobsService: JobsServiceContract = new JobsService(new SupabaseJobsRepository()),
+  profileService: ProfileServiceContract = new ProfileService(
+    new SupabaseProfileRepository(),
+  ),
 ) {
   const app = express();
 
@@ -25,7 +31,12 @@ export function createApp(
   app.use(express.json({ limit: "1mb" }));
   app.use(
     "/api",
-    createApiRouter(config.NODE_ENV ?? "test", authService, jobsService),
+    createApiRouter(
+      config.NODE_ENV ?? "test",
+      authService,
+      jobsService,
+      profileService,
+    ),
   );
   app.use(notFoundMiddleware);
   app.use(errorMiddleware);
