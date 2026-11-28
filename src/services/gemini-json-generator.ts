@@ -19,6 +19,7 @@ export interface GeminiJsonRequest<T> {
   outputSchema: z.ZodType<T>;
   temperature: number;
   maxOutputTokens: number;
+  thinkingConfig?: { thinkingBudget: number };
   errors: GeminiFailureMessages;
 }
 
@@ -55,6 +56,31 @@ function getResponseText(value: unknown): string | null {
     isRecord(part) && typeof part.text === "string" ? [part.text] : [],
   );
   return textParts.length > 0 ? textParts.join("") : null;
+}
+
+function getFinishReason(value: unknown): string | null {
+  if (!isRecord(value) || !Array.isArray(value.candidates)) {
+    return null;
+  }
+  const firstCandidate = value.candidates[0];
+  return isRecord(firstCandidate) &&
+    typeof firstCandidate.finishReason === "string"
+    ? firstCandidate.finishReason
+    : null;
+}
+
+function logResponseDiagnostic(
+  status: number,
+  finishReason: string | null,
+  responseLength: number,
+  category: string,
+): void {
+  console.warn("Gemini response validation failed", {
+    status,
+    finishReason,
+    responseLength,
+    category,
+  });
 }
 
 export class GeminiJsonGenerator {
@@ -99,6 +125,9 @@ export class GeminiJsonGenerator {
               maxOutputTokens: request.maxOutputTokens,
               responseMimeType: "application/json",
               responseSchema: request.responseSchema,
+              ...(request.thinkingConfig
+                ? { thinkingConfig: request.thinkingConfig }
+                : {}),
             },
           }),
         },
@@ -118,11 +147,29 @@ export class GeminiJsonGenerator {
     try {
       responseBody = await response.json();
     } catch {
+      logResponseDiagnostic(response.status, null, 0, "invalid_response_body");
       throw new HttpError(503, request.errors.response);
     }
 
+    const finishReason = getFinishReason(responseBody);
     const responseText = getResponseText(responseBody);
+    const responseLength = responseText?.length ?? 0;
+    if (finishReason === "MAX_TOKENS") {
+      logResponseDiagnostic(
+        response.status,
+        finishReason,
+        responseLength,
+        "truncated",
+      );
+      throw new HttpError(503, request.errors.invalidJson);
+    }
     if (!responseText) {
+      logResponseDiagnostic(
+        response.status,
+        finishReason,
+        responseLength,
+        "empty",
+      );
       throw new HttpError(503, request.errors.noContent);
     }
 
@@ -130,10 +177,22 @@ export class GeminiJsonGenerator {
     try {
       parsedJson = JSON.parse(responseText);
     } catch {
+      logResponseDiagnostic(
+        response.status,
+        finishReason,
+        responseLength,
+        "invalid_json",
+      );
       throw new HttpError(503, request.errors.invalidJson);
     }
     const parsedResult = request.outputSchema.safeParse(parsedJson);
     if (!parsedResult.success) {
+      logResponseDiagnostic(
+        response.status,
+        finishReason,
+        responseLength,
+        "invalid_schema",
+      );
       throw new HttpError(503, request.errors.invalidResult);
     }
     return parsedResult.data;
