@@ -11,6 +11,8 @@ import type {
   SpeechDeliveryMetrics,
 } from "../validators/interview-sessions.validator.js";
 import {
+  interviewQuestionsResultSchema,
+  interviewSessionIdSchema,
   storedInterviewEvaluationSchema,
 } from "../validators/interview-sessions.validator.js";
 import { HttpError } from "../utils/httpError.js";
@@ -76,6 +78,60 @@ function asNumber(value: unknown, message: string): number {
     databaseError(message);
   }
   return value;
+}
+
+function relationRows(value: unknown): unknown[] | null {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (value === null) {
+    return [];
+  }
+  return isRecord(value) ? [value] : null;
+}
+
+export function hasValidPersistedQuestionSet(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !interviewSessionIdSchema.safeParse(value.id).success ||
+    !Array.isArray(value.questions) ||
+    value.questions.length !== 5
+  ) {
+    return false;
+  }
+
+  const questions: Array<{
+    id: string;
+    questionText: string;
+    sequenceNumber: number;
+  }> = [];
+  for (const question of value.questions) {
+    if (
+      !isRecord(question) ||
+      typeof question.id !== "string" ||
+      typeof question.question_text !== "string" ||
+      typeof question.sequence_number !== "number"
+    ) {
+      return false;
+    }
+    questions.push({
+      id: question.id,
+      questionText: question.question_text,
+      sequenceNumber: question.sequence_number,
+    });
+  }
+
+  questions.sort((left, right) => left.sequenceNumber - right.sequenceNumber);
+  return (
+    questions.every(
+      (question, index) =>
+        interviewSessionIdSchema.safeParse(question.id).success &&
+        question.sequenceNumber === index + 1,
+    ) &&
+    interviewQuestionsResultSchema.safeParse({
+      questions: questions.map((question) => question.questionText),
+    }).success
+  );
 }
 
 function parseEvaluation(value: unknown): InterviewAnswer["evaluation"] {
@@ -167,7 +223,7 @@ function buildSummary(
   };
 }
 
-function toSession(value: unknown): InterviewSession {
+export function mapInterviewSessionRow(value: unknown): InterviewSession {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
@@ -180,33 +236,39 @@ function toSession(value: unknown): InterviewSession {
   }
 
   const questions = value.questions.map((question): InterviewSession["questions"][number] => {
+    const answers = isRecord(question)
+      ? relationRows(question.answers)
+      : null;
     if (
       !isRecord(question) ||
       typeof question.id !== "string" ||
       typeof question.question_text !== "string" ||
       typeof question.sequence_number !== "number" ||
-      !Array.isArray(question.answers)
+      !answers
     ) {
       databaseError("Data pertanyaan wawancara tidak valid.");
     }
 
-    if (question.answers.length > 1) {
+    if (answers.length > 1) {
       databaseError("Ditemukan jawaban duplikat pada sesi wawancara.");
     }
     let answer: InterviewSession["questions"][number]["answer"] = null;
-    const rawAnswer = question.answers[0];
+    const rawAnswer = answers[0];
     if (rawAnswer !== undefined) {
+      const evaluations = isRecord(rawAnswer)
+        ? relationRows(rawAnswer.evaluations)
+        : null;
       if (
         !isRecord(rawAnswer) ||
         typeof rawAnswer.id !== "string" ||
         typeof rawAnswer.answer_text !== "string" ||
         typeof rawAnswer.submitted_at !== "string" ||
-        !Array.isArray(rawAnswer.evaluations) ||
-        rawAnswer.evaluations.length > 1
+        !evaluations ||
+        evaluations.length > 1
       ) {
         databaseError("Data jawaban wawancara tidak valid.");
       }
-      const rawEvaluation = rawAnswer.evaluations[0];
+      const rawEvaluation = evaluations[0];
       answer = {
         id: rawAnswer.id,
         answerText: rawAnswer.answer_text,
@@ -268,19 +330,32 @@ export class SupabaseInterviewSessionsRepository
   }
 
   async countSince(applicantId: string, since: string): Promise<number> {
-    const { count, error } = await executeDatabaseRequest(
-      () =>
-        getSupabaseAdminClient()
-          .from("interview_sessions")
-          .select("id", { count: "exact", head: true })
-          .eq("applicant_id", applicantId)
-          .gte("started_at", since),
-      "Riwayat wawancara tidak dapat diproses.",
-    );
-    if (error || count === null) {
-      databaseError("Riwayat wawancara tidak dapat dihitung.");
+    const pageSize = 500;
+    let offset = 0;
+    let validSessionCount = 0;
+    while (true) {
+      const { data, error } = await executeDatabaseRequest(
+        () =>
+          getSupabaseAdminClient()
+            .from("interview_sessions")
+            .select("id, questions(id, question_text, sequence_number)")
+            .eq("applicant_id", applicantId)
+            .gte("started_at", since)
+            .order("started_at", { ascending: true })
+            .order("id", { ascending: true })
+            .range(offset, offset + pageSize - 1),
+        "Riwayat wawancara tidak dapat diproses.",
+      );
+      if (error || !Array.isArray(data)) {
+        databaseError("Riwayat wawancara tidak dapat dihitung.");
+      }
+
+      validSessionCount += data.filter(hasValidPersistedQuestionSet).length;
+      if (data.length < pageSize) {
+        return validSessionCount;
+      }
+      offset += pageSize;
     }
-    return count;
   }
 
   async createWithQuestions(
@@ -320,26 +395,25 @@ export class SupabaseInterviewSessionsRepository
       "Pertanyaan wawancara tidak dapat disimpan.",
     );
     if (questionError) {
-      const { error: rollbackError } = await executeDatabaseRequest(
-        () =>
-          getSupabaseAdminClient()
-            .from("interview_sessions")
-            .delete()
-            .eq("id", session.id)
-            .eq("applicant_id", applicantId),
-        "Sesi wawancara gagal dibersihkan setelah penyimpanan pertanyaan gagal.",
-      );
-      if (rollbackError) {
-        databaseError(
-          "Pertanyaan gagal disimpan dan sesi wawancara tidak dapat dibersihkan.",
-        );
-      }
       databaseError("Pertanyaan wawancara tidak dapat disimpan.");
     }
 
     const created = await this.findById(session.id, applicantId);
     if (!created) {
       databaseError("Sesi wawancara yang dibuat tidak dapat dibaca.");
+    }
+    if (
+      !interviewQuestionsResultSchema.safeParse({
+        questions: created.questions.map((question) => question.questionText),
+      }).success ||
+      created.questions.some(
+        (question, index) =>
+          !interviewSessionIdSchema.safeParse(question.id).success ||
+          question.sequenceNumber !== index + 1 ||
+          question.answer !== null,
+      )
+    ) {
+      databaseError("Data pertanyaan wawancara tidak valid.");
     }
     return created;
   }
@@ -365,7 +439,7 @@ export class SupabaseInterviewSessionsRepository
     if (error || !Array.isArray(data) || count === null) {
       databaseError("Riwayat wawancara tidak dapat diambil.");
     }
-    return { sessions: data.map(toSession), total: count };
+    return { sessions: data.map(mapInterviewSessionRow), total: count };
   }
 
   async findById(
@@ -385,7 +459,7 @@ export class SupabaseInterviewSessionsRepository
     if (error) {
       databaseError("Sesi wawancara tidak dapat diambil.");
     }
-    return data ? toSession(data) : null;
+    return data ? mapInterviewSessionRow(data) : null;
   }
 
   async findQuestion(

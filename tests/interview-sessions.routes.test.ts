@@ -5,6 +5,10 @@ import { createApp } from "../src/app.js";
 import type {
   InterviewSessionsRepositoryContract,
 } from "../src/repositories/interview-sessions.repository.js";
+import {
+  hasValidPersistedQuestionSet,
+  mapInterviewSessionRow,
+} from "../src/repositories/interview-sessions.repository.js";
 import type {
   InterviewAnswer,
   InterviewSession,
@@ -70,11 +74,11 @@ const users: Record<string, AuthenticatedUser> = {
 
 const generatedQuestions: InterviewQuestionsResult = {
   questions: [
-    "Can you describe a project relevant to this role and your contribution?",
-    "How do you prioritize competing deadlines while maintaining quality?",
-    "Tell me about a time you addressed an unexpected technical challenge.",
-    "How do you collaborate with people who have different working styles?",
-    "What would you focus on during your first months in this position?",
+    "Bisakah Anda menjelaskan proyek yang relevan dengan posisi ini dan kontribusi Anda?",
+    "Bagaimana Anda menentukan prioritas saat menghadapi beberapa tenggat sekaligus?",
+    "Ceritakan pengalaman Anda mengatasi tantangan teknis yang tidak terduga.",
+    "Bagaimana cara Anda berkolaborasi dengan rekan yang memiliki gaya kerja berbeda?",
+    "Apa yang akan menjadi fokus Anda pada beberapa bulan pertama di posisi ini?",
   ],
 };
 
@@ -185,7 +189,16 @@ function createMemoryRepository(): InterviewSessionsRepositoryContract & {
     async countSince(applicantId, since) {
       return sessions.filter(
         (item) =>
-          item.applicantId === applicantId && item.startedAt >= since,
+          item.applicantId === applicantId &&
+          item.startedAt >= since &&
+          hasValidPersistedQuestionSet({
+            id: item.id,
+            questions: item.questions.map((question) => ({
+              id: question.id,
+              question_text: question.questionText,
+              sequence_number: question.sequenceNumber,
+            })),
+          }),
       ).length;
     },
     async createWithQuestions(applicantId, jobTitle, questions) {
@@ -434,6 +447,16 @@ test("applicant creates five relevant questions and reads private session histor
     assert.equal(body.data.questions.length, 5);
     assert.equal(body.data.status, "IN_PROGRESS");
     assert.equal(body.data.jobTitle, "Backend Engineer");
+    assert.deepEqual(
+      body.data.questions.map((question) => question.sequenceNumber),
+      [1, 2, 3, 4, 5],
+    );
+    for (const question of body.data.questions) {
+      assert.match(question.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      assert.ok(question.questionText.length >= 20);
+      assert.ok(question.questionText.length <= 400);
+      assert.equal(question.answer, null);
+    }
     assert.ok(!JSON.stringify(body).includes(applicantAProfileId));
 
     const listResponse = await fetch(
@@ -446,6 +469,20 @@ test("applicant creates five relevant questions and reads private session histor
     };
     assert.equal(listBody.data.pagination.total, 1);
     assert.equal(listBody.data.sessions[0]?.id, body.data.id);
+
+    const ownDetailResponse = await fetch(
+      `${baseUrl}/api/interview-sessions/${body.data.id}`,
+      { headers: auth("applicant-a-token") },
+    );
+    assert.equal(ownDetailResponse.status, 200);
+    const ownDetail = (await ownDetailResponse.json()) as {
+      data: InterviewSession;
+    };
+    assert.equal(ownDetail.data.questions.length, 5);
+    assert.deepEqual(
+      ownDetail.data.questions.map((question) => question.sequenceNumber),
+      [1, 2, 3, 4, 5],
+    );
 
     const foreignResponse = await fetch(
       `${baseUrl}/api/interview-sessions/${body.data.id}`,
@@ -583,6 +620,34 @@ test("invalid inputs and AI failures do not create or fabricate sessions", async
     assert.equal(invalidHarness.repository.sessions.length, 0);
   });
 
+  test("invalid AI question data is rejected before creating a session", async () => {
+    const invalidProvider: InterviewAiProviderContract = {
+      isConfigured: () => true,
+      async generateQuestions() {
+        return {
+          questions: generatedQuestions.questions.slice(0, 4),
+        } as InterviewQuestionsResult;
+      },
+      async evaluateAnswer() {
+        return evaluationResult;
+      },
+    };
+    const harness = createHarness({ aiProvider: invalidProvider });
+
+    await withServer(harness, async (baseUrl) => {
+      const response = await postJson(
+        `${baseUrl}/api/interview-sessions`,
+        "applicant-a-token",
+        { jobTitle: "Frontend Engineer" },
+      );
+      const body = (await response.json()) as { message: string };
+
+      assert.equal(response.status, 503);
+      assert.match(body.message, /Format pertanyaan Gemini tidak valid/);
+      assert.equal(harness.repository.sessions.length, 0);
+    });
+  });
+
   const unconfiguredHarness = createHarness({ configured: false });
   await withServer(unconfiguredHarness, async (baseUrl) => {
     const response = await postJson(
@@ -617,6 +682,11 @@ test("invalid inputs and AI failures do not create or fabricate sessions", async
 
 test("daily session quota and evaluation failures are enforced", async () => {
   const quotaHarness = createHarness();
+  await quotaHarness.repository.createWithQuestions(
+    applicantAProfileId,
+    "Incomplete prior session",
+    generatedQuestions.questions.slice(0, 4),
+  );
   await withServer(quotaHarness, async (baseUrl) => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const response = await postJson(
@@ -913,9 +983,107 @@ test("Gemini interview provider validates structured questions and feedback with
   const headers = new Headers(requests[0]?.headers);
   assert.equal(headers.get("x-goog-api-key"), "mock-key");
   const firstBody = JSON.parse(String(requests[0]?.body)) as {
+    systemInstruction: { parts: Array<{ text: string }> };
     contents: Array<{ parts: Array<{ text: string }> }>;
+    generationConfig: {
+      maxOutputTokens: number;
+      responseMimeType: string;
+      responseSchema: { properties: Record<string, unknown> };
+      thinkingConfig: { thinkingBudget: number };
+    };
   };
+  assert.match(firstBody.contents[0]!.parts[0]!.text, /Bahasa Indonesia/);
   assert.match(firstBody.contents[0]!.parts[0]!.text, /UNTRUSTED_JOB_POSITION/);
+  assert.match(firstBody.systemInstruction.parts[0]!.text, /Bahasa Indonesia/);
+  assert.equal(firstBody.generationConfig.maxOutputTokens, 4_096);
+  assert.equal(firstBody.generationConfig.responseMimeType, "application/json");
+  assert.deepEqual(firstBody.generationConfig.thinkingConfig, {
+    thinkingBudget: 0,
+  });
+  assert.ok("questions" in firstBody.generationConfig.responseSchema.properties);
+
+  const secondBody = JSON.parse(String(requests[1]?.body)) as {
+    systemInstruction: { parts: Array<{ text: string }> };
+    contents: Array<{ parts: Array<{ text: string }> }>;
+    generationConfig: {
+      maxOutputTokens: number;
+      thinkingConfig: { thinkingBudget: number };
+    };
+  };
+  assert.match(secondBody.systemInstruction.parts[0]!.text, /Bahasa Indonesia/);
+  assert.match(secondBody.contents[0]!.parts[0]!.text, /feedback.*Bahasa Indonesia/);
+  assert.equal(secondBody.generationConfig.maxOutputTokens, 4_096);
+  assert.deepEqual(secondBody.generationConfig.thinkingConfig, {
+    thinkingBudget: 0,
+  });
+});
+
+test("Gemini incomplete, short, and frontend-shaped question outputs are rejected", async () => {
+  const invalidOutputs: unknown[] = [
+    {},
+    { questions: generatedQuestions.questions.slice(0, 4) },
+    {
+      questions: generatedQuestions.questions.map((questionText, index) => ({
+        id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        questionText,
+        sequenceNumber: index + 1,
+        answer: null,
+      })),
+    },
+  ];
+
+  for (const output of invalidOutputs) {
+    const provider = new GeminiInterviewProvider(
+      new GeminiJsonGenerator("mock-key", "gemini-flash-test", async () =>
+        Response.json({
+          candidates: [
+            { content: { parts: [{ text: JSON.stringify(output) }] } },
+          ],
+        }),
+      ),
+    );
+
+    await assert.rejects(
+      provider.generateQuestions("Frontend Engineer"),
+      (error: unknown) =>
+        error instanceof HttpError &&
+        error.status === 503 &&
+        /Format pertanyaan Gemini tidak valid/.test(error.message),
+    );
+  }
+});
+
+test("database question relations accept singular and empty Supabase embeds", () => {
+  const row = {
+    id: "30000000-0000-4000-8000-000000000001",
+    job_context: "Frontend Engineer",
+    status: "IN_PROGRESS",
+    started_at: "2026-11-28T00:00:00.000Z",
+    questions: generatedQuestions.questions.map((questionText, index) => ({
+      id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      question_text: questionText,
+      sequence_number: index + 1,
+      answers:
+        index === 0
+          ? {
+              id: "50000000-0000-4000-8000-000000000001",
+              answer_text: "Saya membangun antarmuka dengan React.",
+              submitted_at: "2026-11-28T00:01:00.000Z",
+              evaluations: null,
+            }
+          : null,
+    })),
+  };
+
+  const session = mapInterviewSessionRow(row);
+
+  assert.equal(session.questions.length, 5);
+  assert.deepEqual(
+    session.questions.map((question) => question.sequenceNumber),
+    [1, 2, 3, 4, 5],
+  );
+  assert.equal(session.questions[0]?.answer?.evaluation, null);
+  assert.equal(session.questions[1]?.answer, null);
 });
 
 test("malformed Gemini JSON fails explicitly", async () => {

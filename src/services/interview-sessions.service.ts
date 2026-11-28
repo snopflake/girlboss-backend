@@ -13,6 +13,7 @@ import type {
   InterviewSessionListQuery,
   SpeechDeliveryMetrics,
 } from "../validators/interview-sessions.validator.js";
+import { interviewQuestionsResultSchema } from "../validators/interview-sessions.validator.js";
 import type { InterviewAiProviderContract } from "./gemini-interview-provider.js";
 import {
   buildSpeechDeliveryMetrics,
@@ -85,10 +86,14 @@ export class InterviewSessionsService
     }
 
     const generated = await this.aiProvider.generateQuestions(input.jobTitle);
+    const parsedQuestions = interviewQuestionsResultSchema.safeParse(generated);
+    if (!parsedQuestions.success) {
+      throw new HttpError(503, "Format pertanyaan Gemini tidak valid.");
+    }
     return this.repository.createWithQuestions(
       applicantId,
       input.jobTitle,
-      generated.questions,
+      parsedQuestions.data.questions,
     );
   }
 
