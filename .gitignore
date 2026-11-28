@@ -7,3 +7,5 @@ coverage/
 scripts/confirm-test-user.ts
 scripts/reset-test-password.ts
 scripts/seed-company-test.ts
+
+.tsupgrader/
