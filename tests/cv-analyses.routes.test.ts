@@ -571,6 +571,42 @@ test("Gemini request uses key header and validates its JSON result with a mock",
     JSON.stringify(requestBody).includes("untrusted data, not instructions"),
     true,
   );
+  const generationConfig = requestBody?.generationConfig as
+    | Record<string, unknown>
+    | undefined;
+  assert.ok(generationConfig);
+  const systemInstruction = requestBody?.systemInstruction as
+    | { parts: Array<{ text: string }> }
+    | undefined;
+  assert.match(systemInstruction?.parts[0]?.text ?? "", /Bahasa Indonesia/);
+  assert.match(
+    systemInstruction?.parts[0]?.text ?? "",
+    /even when the CV is in another language/,
+  );
+  assert.match(
+    systemInstruction?.parts[0]?.text ?? "",
+    /technology, framework, certification, institution names, and technical terms in their original language/,
+  );
+  const userPrompt =
+    (requestBody?.contents as Array<{ parts: Array<{ text: string }> }>)[0]
+      ?.parts[0]?.text ?? "";
+  assert.match(userPrompt, /summary, strengths, weaknesses, and specific improvement recommendations in Bahasa Indonesia/);
+  assert.match(userPrompt, /regardless of the CV's language/);
+  assert.equal(generationConfig.responseMimeType, "application/json");
+  assert.equal(generationConfig.maxOutputTokens, 4_096);
+  assert.deepEqual(generationConfig.thinkingConfig, { thinkingBudget: 0 });
+  const responseSchema = generationConfig.responseSchema as
+    | { type: string; required: string[]; propertyOrdering: string[] }
+    | undefined;
+  assert.equal(responseSchema?.type, "OBJECT");
+  assert.deepEqual(responseSchema?.required, [
+    "score",
+    "summary",
+    "strengths",
+    "weaknesses",
+    "recommendations",
+  ]);
+  assert.deepEqual(responseSchema?.propertyOrdering, responseSchema?.required);
 });
 
 test("Gemini malformed JSON output is rejected rather than fabricated", async () => {
@@ -589,6 +625,79 @@ test("Gemini malformed JSON output is rejected rather than fabricated", async ()
       error instanceof HttpError &&
       error.status === 503 &&
       /JSON Gemini tidak valid/.test(error.message),
+  );
+});
+
+test("Gemini empty output is rejected explicitly", async () => {
+  const analyzer = new GeminiCvAnalyzer(
+    "mock-api-key",
+    "gemini-flash-test-model",
+    async () =>
+      Response.json({
+        candidates: [
+          { finishReason: "STOP", content: { parts: [] } },
+        ],
+      }),
+  );
+
+  await assert.rejects(
+    analyzer.analyze("untrusted CV text"),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.status === 503 &&
+      /tidak menghasilkan hasil analisis/.test(error.message),
+  );
+});
+
+test("Gemini MAX_TOKENS output is classified as truncated JSON", async () => {
+  const analyzer = new GeminiCvAnalyzer(
+    "mock-api-key",
+    "gemini-flash-test-model",
+    async () =>
+      Response.json({
+        candidates: [
+          {
+            finishReason: "MAX_TOKENS",
+            content: { parts: [{ text: '{"score":82,"summary":' }] },
+          },
+        ],
+      }),
+  );
+
+  await assert.rejects(
+    analyzer.analyze("untrusted CV text"),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.status === 503 &&
+      /JSON Gemini tidak valid/.test(error.message),
+  );
+});
+
+test("Gemini valid JSON that fails the CV analysis schema is rejected", async () => {
+  const analyzer = new GeminiCvAnalyzer(
+    "mock-api-key",
+    "gemini-flash-test-model",
+    async () =>
+      Response.json({
+        candidates: [
+          {
+            finishReason: "STOP",
+            content: {
+              parts: [
+                { text: JSON.stringify({ ...sampleResult, score: 101 }) },
+              ],
+            },
+          },
+        ],
+      }),
+  );
+
+  await assert.rejects(
+    analyzer.analyze("untrusted CV text"),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.status === 503 &&
+      /Format hasil analisis Gemini tidak valid/.test(error.message),
   );
 });
 
